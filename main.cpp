@@ -6,6 +6,8 @@
 #include <map>
 #include <vector>
 #include <tuple>
+#include <memory>
+#include <algorithm>
 #include <cstdlib>
 
 #include <curl/curl.h>
@@ -15,106 +17,116 @@
 
 using json = nlohmann::json;
 
-// Simple struct to hold a track
+// ─────────────────────────────────────────────────────────────────────────────
+// Data structures & Tree Node
+// ─────────────────────────────────────────────────────────────────────────────
+
 struct Track {
-    std::string id;
-    std::string name;
-    std::string album;
-    std::string artist;
+    std::string id, name, album, artist;
 };
 
-// libcurl write callback
-static size_t write_cb(void* contents, size_t size, size_t nmemb, void* userp) {
-    auto* s = static_cast<std::string*>(userp);
-    size_t total = size * nmemb;
+struct Node {
+    std::string name;
+    Track* track;                     // non-nullptr only for leaf (track) nodes
+    Node* parent;
+    std::vector<std::unique_ptr<Node>> children;
+    bool expanded = false;
+    int depth = 0;
+    Node(std::string n, Track* t, Node* p)
+      : name(std::move(n)), track(t), parent(p) {
+        depth = p ? p->depth + 1 : 0;
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sort children alphabetically by node->name
+// ─────────────────────────────────────────────────────────────────────────────
+
+void sort_tree(Node* node) {
+    std::sort(node->children.begin(), node->children.end(),
+              [](auto& a, auto& b){ return a->name < b->name; });
+    for (auto& child : node->children) {
+        sort_tree(child.get());
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// libcurl callbacks & helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+static size_t write_cb(void* contents, size_t sz, size_t nmemb, void* up) {
+    auto* s = static_cast<std::string*>(up);
+    size_t total = sz * nmemb;
     s->append(static_cast<char*>(contents), total);
     return total;
 }
 
-// Perform a GET and return JSON
 json http_get_json(const std::string& url,
                    const std::map<std::string,std::string>& headers) {
     CURL* curl = curl_easy_init();
     if (!curl) throw std::runtime_error("curl_easy_init failed");
-    std::string response;
+    std::string resp;
     struct curl_slist* hdrs = nullptr;
-    for (auto& [k,v] : headers) {
+    for (auto& [k,v]: headers)
         hdrs = curl_slist_append(hdrs, (k + ": " + v).c_str());
-    }
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    // allow self‐signed certs
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_perform(curl);
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
-    return json::parse(response);
+    return json::parse(resp);
 }
 
-// Perform a POST with JSON payload, return JSON
 json http_post_json(const std::string& url,
                     const json& payload,
                     const std::map<std::string,std::string>& headers) {
     CURL* curl = curl_easy_init();
     if (!curl) throw std::runtime_error("curl_easy_init failed");
-    std::string response;
-    std::string body = payload.dump();
-    struct curl_slist* hdrs = nullptr;
-    // ensure JSON header
-    hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
-    for (auto& [k,v] : headers) {
+    std::string resp, body = payload.dump();
+    struct curl_slist* hdrs = curl_slist_append(nullptr, "Content-Type: application/json");
+    for (auto& [k,v]: headers)
         hdrs = curl_slist_append(hdrs, (k + ": " + v).c_str());
-    }
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_perform(curl);
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
-    return json::parse(response);
+    return json::parse(resp);
 }
 
-// Load JSON config from file, or prompt and save if missing
+// ─────────────────────────────────────────────────────────────────────────────
+// Configuration & Authentication
+// ─────────────────────────────────────────────────────────────────────────────
+
 json load_config(const std::string& path) {
     std::ifstream in(path);
     if (in) {
-        json j;
-        in >> j;
+        json j; in >> j;
         return j;
     }
-
-    // Prompt interactively
-    std::string server_url, username, password;
-    std::cout << "Jellyfin server URL: ";
-    std::getline(std::cin, server_url);
-    std::cout << "Username: ";
-    std::getline(std::cin, username);
-    std::cout << "Password: ";
-    std::getline(std::cin, password);
-
-    json j = {
-        {"server_url", server_url},
-        {"username",   username},
-        {"password",   password}
-    };
+    // Prompt and save
+    std::string url, user, pass;
+    std::cout << "Jellyfin server URL: "; std::getline(std::cin, url);
+    std::cout << "Username: ";          std::getline(std::cin, user);
+    std::cout << "Password: ";          std::getline(std::cin, pass);
+    json j = { {"server_url",url}, {"username",user}, {"password",pass} };
     std::ofstream out(path);
-    out << j.dump(2) << std::endl;
+    out << j.dump(2) << "\n";
     return j;
 }
 
-// Authenticate via username/password (no API key support)
-// Returns (accessToken, userId, baseUrl)
 std::tuple<std::string,std::string,std::string>
 authenticate(const json& cfg) {
     std::string base = cfg.at("server_url").get<std::string>();
-    // strip trailing slash
     if (!base.empty() && base.back() == '/') base.pop_back();
-    std::vector<std::string> candidates = { base, base + "/jellyfin" };
+    std::vector<std::string> cand = { base, base + "/jellyfin" };
 
     json payload = {
         {"Username", cfg.at("username").get<std::string>()},
@@ -125,42 +137,38 @@ authenticate(const json& cfg) {
          R"(MediaBrowser Client="TUI", Device="cli", DeviceId="caitunes", Version="1.0")"}
     };
 
-    for (auto& cand : candidates) {
+    for (auto& c : cand) {
         try {
-            auto resp = http_post_json(cand + "/Users/AuthenticateByName",
-                                      payload, hdrs);
-            std::string token = resp.value("AccessToken", "");
-            auto user = resp.value("User", json::object());
-            std::string user_id = user.value("Id", "");
-            if (!token.empty() && !user_id.empty()) {
-                return {token, user_id, cand};
-            }
-        } catch (...) {
-            // try next candidate
-        }
+            auto r = http_post_json(c + "/Users/AuthenticateByName", payload, hdrs);
+            std::string token = r.value("AccessToken","");
+            auto user = r.value("User", json::object());
+            std::string uid = user.value("Id","");
+            if (!token.empty() && !uid.empty()) return {token, uid, c};
+        } catch(...) { }
     }
-    std::cerr << "Authentication failed. Check URL, username, and password.\n";
+    std::cerr << "Authentication failed. Check URL/credentials.\n";
     std::exit(1);
 }
 
-// Fetch all audio tracks for the user
+// ─────────────────────────────────────────────────────────────────────────────
+// Fetch audio tracks
+// ─────────────────────────────────────────────────────────────────────────────
+
 std::vector<Track> fetch_tracks(const std::string& base,
                                 const std::string& token,
                                 const std::string& user_id) {
     std::vector<Track> out;
     int start = 0, limit = 10000;
-    auto hdrs = std::map<std::string,std::string>{
-        {"X-Emby-Token", token}
-    };
+    auto hdrs = std::map<std::string,std::string>{{"X-Emby-Token",token}};
     while (true) {
-        auto resp = http_get_json(
-            base + "/Users/" + user_id + "/Items?IncludeItemTypes=Audio"
-                   "&Recursive=true&SortBy=Album,SortName&SortOrder=Ascending"
-                   "&StartIndex=" + std::to_string(start) +
-                   "&Limit="      + std::to_string(limit),
-            hdrs
+        auto r = http_get_json(
+          base + "/Users/" + user_id + "/Items?IncludeItemTypes=Audio"
+                 "&Recursive=true&SortBy=Album,SortName&SortOrder=Ascending"
+                 "&StartIndex=" + std::to_string(start)
+                 + "&Limit="    + std::to_string(limit),
+          hdrs
         );
-        auto items = resp.value("Items", json::array());
+        auto items = r.value("Items", json::array());
         if (items.empty()) break;
         for (auto& it : items) {
             out.push_back({
@@ -170,8 +178,8 @@ std::vector<Track> fetch_tracks(const std::string& base,
                 !it.value("AlbumArtist","").empty()
                   ? it.value("AlbumArtist","")
                   : (!it.value("Artists", json::array()).empty()
-                        ? it["Artists"][0].value("Name","Unknown")
-                        : std::string("Unknown"))
+                     ? it["Artists"][0].value("Name","Unknown")
+                     : std::string("Unknown"))
             });
         }
         if ((int)items.size() < limit) break;
@@ -180,98 +188,177 @@ std::vector<Track> fetch_tracks(const std::string& base,
     return out;
 }
 
-// Very simple ncurses UI: list tracks, arrow to navigate, enter to play
-void build_ui(const std::vector<Track>& tracks) {
-    initscr();
-    cbreak();
-    noecho();
-    keypad(stdscr, TRUE);
+// ─────────────────────────────────────────────────────────────────────────────
+// Build hierarchical tree (Artist→Album→Track), collapsed by default
+// ─────────────────────────────────────────────────────────────────────────────
 
-    mvprintw(0, 0, "caitunes: %d tracks. Press q to quit.\n", (int)tracks.size());
-    int row = 2;
+std::unique_ptr<Node> build_tree(const std::vector<Track>& tracks) {
+    auto root = std::make_unique<Node>("Music Library", nullptr, nullptr);
+    std::map<std::string,Node*> artist_map;
+
     for (auto& t : tracks) {
-        mvprintw(row++, 2, "%s - %s", t.artist.c_str(), t.name.c_str());
-        if (row >= LINES - 2) break;
+        Node* artist_node;
+        auto it = artist_map.find(t.artist);
+        if (it == artist_map.end()) {
+            artist_node = new Node(t.artist, nullptr, root.get());
+            root->children.emplace_back(artist_node);
+            artist_map[t.artist] = artist_node;
+        } else {
+            artist_node = it->second;
+        }
+        // find or create album node
+        Node* album_node = nullptr;
+        for (auto& c : artist_node->children) {
+            if (c->name == t.album) { album_node = c.get(); break; }
+        }
+        if (!album_node) {
+            album_node = new Node(t.album, nullptr, artist_node);
+            artist_node->children.emplace_back(album_node);
+        }
+        // add track under album (always leaf)
+        album_node->children.emplace_back(
+            std::make_unique<Node>(t.name, const_cast<Track*>(&t), album_node)
+        );
     }
+
+    // sort all levels alphabetically
+    sort_tree(root.get());
+    return root;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flatten expanded nodes to a visible list
+// ─────────────────────────────────────────────────────────────────────────────
+
+void flatten(Node* node, std::vector<Node*>& out) {
+    for (auto& c : node->children) {
+        out.push_back(c.get());
+        if (c->expanded) {
+            flatten(c.get(), out);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Draw only the visible window portion of the tree
+// ─────────────────────────────────────────────────────────────────────────────
+
+void draw_tree(const std::vector<Node*>& vis, size_t cursor, size_t win_top) {
+    erase();  // partial redraw to reduce flicker
+    int data_lines = LINES - 1;
+    int y = 0;
+    for (size_t i = win_top; i < vis.size() && y < data_lines; ++i) {
+        Node* n = vis[i];
+        std::string indent(n->depth * 2, ' ');
+        if (i == cursor) attron(A_REVERSE);
+        mvprintw(y, 0, "%s%s", indent.c_str(), n->name.c_str());
+        if (i == cursor) attroff(A_REVERSE);
+        y++;
+    }
+    mvprintw(LINES - 1, 0,
+        "↑/↓ scroll  → expand/enter  ← collapse/back  Enter=play  q=quit");
     refresh();
 }
 
-void main_loop(libvlc_instance_t* vlc,
-               std::vector<Track>& queue,
-               const std::vector<Track>& all_tracks,
-               const std::string& base,
-               const std::string& token) {
-    int ch;
-    size_t idx = 0;
+// ─────────────────────────────────────────────────────────────────────────────
+// UI loop: handle cursor, window offset, keybindings, and playback
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ui_loop(Node* root, const std::string& base, const std::string& token) {
+    initscr(); cbreak(); noecho(); keypad(stdscr, TRUE);
+
+    std::vector<Node*> visible;
+    flatten(root, visible);
+
+    size_t cursor = 0, win_top = 0;
+    int data_lines = LINES - 1;
+
+    libvlc_instance_t* ml = libvlc_new(0, nullptr);
     libvlc_media_player_t* player = nullptr;
 
+    draw_tree(visible, cursor, win_top);
+
+    int ch;
     while ((ch = getch()) != 'q') {
+        Node* cur = visible[cursor];
         switch (ch) {
-            case KEY_DOWN:
-                if (idx + 1 < all_tracks.size()) idx++;
-                break;
             case KEY_UP:
-                if (idx > 0) idx--;
+                if (cursor > 0) cursor--;
                 break;
-            case '\n': {
-                if (player) libvlc_media_player_stop(player);
-                auto& t = all_tracks[idx];
-                std::string url = base
-                    + "/Audio/" + t.id
-                    + "/universal?AudioCodec=mp3&Container=mp3&api_key="
-                    + token;
-                libvlc_media_t* m = libvlc_media_new_location(vlc, url.c_str());
-                player = libvlc_media_player_new_from_media(m);
-                libvlc_media_release(m);
-                libvlc_media_player_play(player);
+            case KEY_DOWN:
+                if (cursor + 1 < visible.size()) cursor++;
                 break;
-            }
+            case KEY_RIGHT:
+                if (!cur->children.empty()) {
+                    cur->expanded = true;
+                }
+                break;
+            case KEY_LEFT:
+                if (cur->expanded) {
+                    cur->expanded = false;
+                } else if (cur->parent) {
+                    // jump back to parent
+                    for (size_t i = 0; i < visible.size(); ++i) {
+                        if (visible[i] == cur->parent) {
+                            cursor = i;
+                            break;
+                        }
+                    }
+                }
+                break;
+            case '\n':
+                if (cur->track) {
+                    if (player) libvlc_media_player_stop(player);
+                    std::string url = base
+                        + "/Audio/" + cur->track->id
+                        + "/universal?AudioCodec=mp3&Container=mp3&api_key="
+                        + token;
+                    auto m = libvlc_media_new_location(ml, url.c_str());
+                    player = libvlc_media_player_new_from_media(m);
+                    libvlc_media_release(m);
+                    libvlc_media_player_play(player);
+                }
+                break;
             default:
                 break;
         }
-        // redraw list with highlight
-        for (int i = 0; i < (int)all_tracks.size() && i < LINES - 2; i++) {
-            if ((size_t)i == idx) attron(A_REVERSE);
-            mvprintw(2 + i, 2, "%s - %s",
-                     all_tracks[i].artist.c_str(),
-                     all_tracks[i].name.c_str());
-            if ((size_t)i == idx) attroff(A_REVERSE);
+
+        // recalc visible & adjust window
+        visible.clear();
+        flatten(root, visible);
+        if (cursor < win_top) {
+            win_top = cursor;
+        } else if (cursor >= win_top + data_lines) {
+            win_top = cursor - data_lines + 1;
         }
-        refresh();
+
+        draw_tree(visible, cursor, win_top);
     }
 
     if (player) {
         libvlc_media_player_stop(player);
         libvlc_media_player_release(player);
     }
+    libvlc_release(ml);
     endwin();
 }
 
-int main(int argc, char** argv) {
+// ─────────────────────────────────────────────────────────────────────────────
+// main()
+// ─────────────────────────────────────────────────────────────────────────────
+
+int main() {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
-    // Load or prompt for config
-    json cfg = load_config(std::string(getenv("HOME")) + "/.caitunes_config.json");
+    std::string cfg_path = std::string(getenv("HOME")) + "/.caitunes_config.json";
+    json cfg = load_config(cfg_path);
 
-    // Authenticate and fetch library
-    auto [token, user_id, base] = authenticate(cfg);
+    auto [token,user_id,base] = authenticate(cfg);
     auto tracks = fetch_tracks(base, token, user_id);
 
-    // Initialize UI and queue
-    build_ui(tracks);
-    std::vector<Track> queue = tracks;
+    auto root = build_tree(tracks);
+    ui_loop(root.get(), base, token);
 
-    // Init libVLC
-    libvlc_instance_t* vlc = libvlc_new(0, nullptr);
-    if (!vlc) {
-        std::cerr << "Error initializing libVLC\n";
-        return 1;
-    }
-
-    // Start main loop
-    main_loop(vlc, queue, tracks, base, token);
-
-    libvlc_release(vlc);
     curl_global_cleanup();
     return 0;
 }
