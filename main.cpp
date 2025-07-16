@@ -19,6 +19,7 @@
 
 using json = nlohmann::json;
 
+const std::string VERSION = "1.0";
 // ─────────────────────────────────────────────────────────────────────────────
 // Data structures
 // ─────────────────────────────────────────────────────────────────────────────
@@ -139,7 +140,7 @@ authenticate(const json& cfg) {
     };
     auto hdrs = std::map<std::string,std::string>{
         {"X-Emby-Authorization",
-         R"(MediaBrowser Client="TUI", Device="cli", DeviceId="caitunes", Version="1.0")"}
+         R"(MediaBrowser Client="TUI", Device="cli", DeviceId="aitunes", Version=")" + VERSION + R"(")"}
     };
     for (auto& c : cand) {
         try {
@@ -522,13 +523,16 @@ void ui_loop(Node* root,
 
 int main(){
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    std::string cfg = std::string(getenv("HOME")) + "/.caitunes_config.json";
+    std::string cfg = "aitunes_config.json";
     json cfgj = load_config(cfg);
+    std::cout << "AITUNES v" << VERSION << std::endl;
     auto [token,user,base] = authenticate(cfgj);
+    std::cout << "🕪 Loading Tracks, please wait..." << std::endl;
     auto tracks = fetch_tracks(base,token,user);
     auto root = build_tree(tracks);
     ui_loop(root.get(),base,token);
     curl_global_cleanup();
+    std::cout << "Thanks for vibing, goodbye." << std::endl;
     return 0;
 }
 
