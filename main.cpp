@@ -221,7 +221,7 @@ std::unique_ptr<Node> build_tree(const std::vector<Track>& tracks) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UI Loop with Queuing, Focus & Auto-Advance
+// UI Loop with Queuing, Focus & Auto-Advance, plus Play/Pause
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum Focus { TREE_FOCUSED, QUEUE_FOCUSED };
@@ -259,6 +259,9 @@ void ui_loop(Node* root,
     libvlc_media_player_t* player=nullptr;
     Node* playing_node=nullptr;
 
+    // ** New **: Play/pause flag
+    bool paused = false;
+
     auto draw_ui = [&]() {
         // rebuild tree view
         visible.clear();
@@ -272,7 +275,7 @@ void ui_loop(Node* root,
         for (size_t idx=win_top; idx<visible.size() && y<main_h-1; ++idx,++y) {
             Node* n=visible[idx]; int x=1;
             if(n->depth>0){
-                for(int d=1;d<n->depth;++d){
+                for(int d=1; d<n->depth; ++d){
                     mvwaddch(main_win,y,x,ACS_VLINE);
                     x+=2;
                 }
@@ -328,7 +331,8 @@ void ui_loop(Node* root,
         werase(controls_win);
         wattron(controls_win,A_REVERSE);
         mvwprintw(controls_win,0,0,
-          "Tab=switch focus  F=add/remove  ↑/↓ scroll  → expand  ← collapse  Enter=play  q=quit");
+          "Tab=switch focus  F=add/remove  ↑/↓ scroll  → expand  ← collapse"
+          "  Enter=play  Space=pause/play  q=quit");
         wattroff(controls_win,A_REVERSE);
         wnoutrefresh(controls_win);
 
@@ -340,131 +344,131 @@ void ui_loop(Node* root,
 
     int data_lines = main_h-2;
     int ch;
-    while(true){
+    while (true) {
         ch = getch();
-        // handle input if any
-        if(ch!=-1){
-            if(ch=='\t'){
-                focus = (focus==TREE_FOCUSED ? QUEUE_FOCUSED : TREE_FOCUSED);
+        if (ch != -1) {
+            // Play/pause on Space
+            if (ch == ' ' && player) {
+                paused = !paused;
+                libvlc_media_player_set_pause(player, paused ? 1 : 0);
             }
-            else if(ch=='F' || ch=='f'){
-                if(focus==TREE_FOCUSED){
+            else if (ch == '\t') {
+                focus = (focus == TREE_FOCUSED ? QUEUE_FOCUSED : TREE_FOCUSED);
+            }
+            else if (ch == 'F' || ch == 'f') {
+                if (focus == TREE_FOCUSED) {
                     Node* cur = visible[cursor];
                     std::vector<Node*> to_add;
-                    if(cur->track){
-                        to_add.push_back(cur);
-                    } else {
-                        collect_tracks(cur,to_add);
-                    }
-                    for(auto n: to_add) queueList.push_back(n);
+                    if (cur->track) to_add.push_back(cur);
+                    else collect_tracks(cur, to_add);
+                    for (auto n : to_add) queueList.push_back(n);
                 } else {
-                    // remove from queue
-                    if(!queueList.empty()){
-                        queueList.erase(queueList.begin()+queueCursor);
-                        if(queueCursor>=queueList.size() && queueCursor>0)
-                            --queueCursor;
+                    if (!queueList.empty()) {
+                        queueList.erase(queueList.begin() + queueCursor);
+                        if (queueCursor > 0) --queueCursor;
                     }
                 }
             }
-            else if(focus==TREE_FOCUSED){
+            else if (focus == TREE_FOCUSED) {
                 Node* cur = visible[cursor];
-                switch(ch){
+                switch (ch) {
                     case KEY_UP:
-                        if(cursor>0) --cursor;
+                        if (cursor > 0) --cursor;
                         break;
                     case KEY_DOWN:
-                        if(cursor+1<visible.size()) ++cursor;
+                        if (cursor + 1 < visible.size()) ++cursor;
                         break;
                     case KEY_RIGHT:
-                        if(!cur->children.empty()) cur->expanded=true;
+                        if (!cur->children.empty()) cur->expanded = true;
                         break;
                     case KEY_LEFT:
-                        if(cur->expanded) cur->expanded=false;
-                        else if(cur->parent){
-                            for(size_t i=0;i<visible.size();++i)
-                                if(visible[i]==cur->parent){ cursor=i; break; }
+                        if (cur->expanded) cur->expanded = false;
+                        else if (cur->parent) {
+                            for (size_t i = 0; i < visible.size(); ++i)
+                                if (visible[i] == cur->parent) { cursor = i; break; }
                         }
                         break;
                     case '\n':
-                        if(cur->track){
-                            if(player) libvlc_media_player_stop(player);
-                            std::string url = base+"/Audio/"+cur->track->id
-                                +"/universal?AudioCodec=mp3&Container=mp3&api_key="+token;
-                            auto m = libvlc_media_new_location(vlc,url.c_str());
+                        if (cur->track) {
+                            if (player) libvlc_media_player_stop(player);
+                            std::string url = base + "/Audio/" + cur->track->id
+                              + "/universal?AudioCodec=mp3&Container=mp3&api_key=" + token;
+                            auto m = libvlc_media_new_location(vlc, url.c_str());
                             player = libvlc_media_player_new_from_media(m);
                             libvlc_media_release(m);
                             libvlc_media_player_play(player);
                             playing_node = cur;
+                            paused = false;
                         }
                         break;
                 }
             }
             else { // QUEUE_FOCUSED
-                switch(ch){
+                switch (ch) {
                     case KEY_UP:
-                        if(queueCursor>0) --queueCursor;
+                        if (queueCursor > 0) --queueCursor;
                         break;
                     case KEY_DOWN:
-                        if(queueCursor+1<queueList.size()) ++queueCursor;
+                        if (queueCursor + 1 < queueList.size()) ++queueCursor;
                         break;
                     case '\n':
-                        if(!queueList.empty()){
+                        if (!queueList.empty()) {
                             Node* cur = queueList[queueCursor];
-                            if(player) libvlc_media_player_stop(player);
-                            std::string url = base+"/Audio/"+cur->track->id
-                                +"/universal?AudioCodec=mp3&Container=mp3&api_key="+token;
-                            auto m = libvlc_media_new_location(vlc,url.c_str());
+                            if (player) libvlc_media_player_stop(player);
+                            std::string url = base + "/Audio/" + cur->track->id
+                              + "/universal?AudioCodec=mp3&Container=mp3&api_key=" + token;
+                            auto m = libvlc_media_new_location(vlc, url.c_str());
                             player = libvlc_media_player_new_from_media(m);
                             libvlc_media_release(m);
                             libvlc_media_player_play(player);
                             playing_node = cur;
+                            paused = false;
                         }
                         break;
                 }
             }
-            // adjust scroll offsets
-            if(focus==TREE_FOCUSED){
-                if(cursor<win_top) win_top=cursor;
-                else if(cursor>=win_top+data_lines)
-                    win_top=cursor-data_lines+1;
+
+            // scroll adjustments
+            if (focus == TREE_FOCUSED) {
+                if (cursor < win_top) win_top = cursor;
+                else if (cursor >= win_top + data_lines)
+                    win_top = cursor - data_lines + 1;
             } else {
-                int qlines = queue_h-2;
-                if(queueCursor<queue_top) queue_top=queueCursor;
-                else if(queueCursor>=queue_top+qlines)
-                    queue_top=queueCursor-qlines+1;
+                int qlines = queue_h - 2;
+                if (queueCursor < queue_top) queue_top = queueCursor;
+                else if (queueCursor >= queue_top + qlines)
+                    queue_top = queueCursor - qlines + 1;
             }
         }
 
         // auto-advance
-        if(player){
+        if (player) {
             auto state = libvlc_media_player_get_state(player);
-            if(state==libvlc_Ended){
-                // remove finished if at front
-                if(!queueList.empty() && queueList.front()==playing_node){
+            if (state == libvlc_Ended) {
+                if (!queueList.empty() && queueList.front() == playing_node) {
                     queueList.erase(queueList.begin());
-                    if(queueCursor>0) --queueCursor;
+                    if (queueCursor > 0) --queueCursor;
                 }
-                // play next
-                if(!queueList.empty()){
+                if (!queueList.empty()) {
                     Node* next = queueList.front();
-                    if(player) libvlc_media_player_stop(player);
-                    std::string url = base+"/Audio/"+next->track->id
-                        +"/universal?AudioCodec=mp3&Container=mp3&api_key="+token;
-                    auto m = libvlc_media_new_location(vlc,url.c_str());
+                    libvlc_media_player_stop(player);
+                    std::string url = base + "/Audio/" + next->track->id
+                      + "/universal?AudioCodec=mp3&Container=mp3&api_key=" + token;
+                    auto m = libvlc_media_new_location(vlc, url.c_str());
                     player = libvlc_media_player_new_from_media(m);
                     libvlc_media_release(m);
                     libvlc_media_player_play(player);
                     playing_node = next;
+                    paused = false;
                 }
             }
         }
 
         draw_ui();
-
-        if(ch=='q') break;
+        if (ch == 'q') break;
     }
 
-    if(player){
+    if (player) {
         libvlc_media_player_stop(player);
         libvlc_media_player_release(player);
     }
@@ -478,7 +482,7 @@ void ui_loop(Node* root,
 
 int main(){
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    std::string cfg = std::string(getenv("HOME"))+"/.caitunes_config.json";
+    std::string cfg = std::string(getenv("HOME")) + "/.caitunes_config.json";
     json cfgj = load_config(cfg);
     auto [token,user,base] = authenticate(cfgj);
     auto tracks = fetch_tracks(base, token, user);
