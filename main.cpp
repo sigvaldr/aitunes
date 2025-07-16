@@ -230,7 +230,6 @@ enum Focus { TREE_FOCUSED, QUEUE_FOCUSED };
 void ui_loop(Node* root,
              const std::string& base,
              const std::string& token) {
-    // Enable UTF-8 so glyphs render correctly
     setlocale(LC_ALL, "");
     initscr();
     curs_set(0);
@@ -329,9 +328,10 @@ void ui_loop(Node* root,
         // CONTROLS PANEL
         werase(controls_win);
         wattron(controls_win, A_REVERSE);
+        const char* status_icon = paused ? "⏸" : " ▶";
         mvwprintw(controls_win, 0, 1,
-                   "%s Vol:%3d%%  Navigate: ↑ → ↓ ← | Play: ⏎ | Pause: ␣ | Vol: PgUp/PgDn | Add/Rm Queue: F | Quit: Q",
-                   paused ? "⏸" : "▶", volume);
+                   "%s 🕪 %d%%  Navigate: ↑ → ↓ ← ❘ Play: ⏎ ❘ ▶/⏸ : spcbar ❘ Vol: PgUp/PgDn ❘ Add/Rm: F ❘ Quit: Q",
+                   status_icon, volume);
         wattroff(controls_win, A_REVERSE);
         wnoutrefresh(controls_win);
 
@@ -357,7 +357,7 @@ void ui_loop(Node* root,
             if (player) libvlc_audio_set_volume(player, volume);
             handled = true;
         }
-        // Ctrl+Up/Down fall-back
+        // Ctrl+Up/Down fallback
         else if (ch == 27) {
             nodelay(stdscr, TRUE);
             int s1=getch(),s2=getch(),s3=getch(),s4=getch(),s5=getch();
@@ -376,7 +376,7 @@ void ui_loop(Node* root,
                 libvlc_media_player_set_pause(player, paused?1:0);
             }
             else if (ch=='\t') {
-                focus = focus==TREE_FOCUSED ? QUEUE_FOCUSED : TREE_FOCUSED;
+                focus = (focus == TREE_FOCUSED ? QUEUE_FOCUSED : TREE_FOCUSED);
             }
             else if (ch=='F'||ch=='f') {
                 if (focus==TREE_FOCUSED) {
