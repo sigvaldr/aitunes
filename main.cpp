@@ -9,6 +9,7 @@
 #include <memory>
 #include <algorithm>
 #include <cstdlib>
+#include <random>
 #include <locale.h>
 
 #include <curl/curl.h>
@@ -222,7 +223,7 @@ std::unique_ptr<Node> build_tree(const std::vector<Track>& tracks) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI Loop with Queuing, Focus & Auto-Advance,
-// Play/Pause & Volume (PgUp/PgDn)
+// Play/Pause, Volume (PgUp/PgDn), Shuffle
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum Focus { TREE_FOCUSED, QUEUE_FOCUSED };
@@ -258,6 +259,10 @@ void ui_loop(Node* root,
 
     int  volume = 50;
     bool paused = false;
+
+    // random shuffle engine
+    std::random_device rd;
+    std::mt19937 rng(rd());
 
     libvlc_instance_t* vlc    = libvlc_new(0,nullptr);
     libvlc_media_player_t* player = nullptr;
@@ -330,7 +335,7 @@ void ui_loop(Node* root,
         wattron(controls_win, A_REVERSE);
         const char* status_icon = paused ? "⏸" : " ▶";
         mvwprintw(controls_win, 0, 1,
-                   "%s 🕪 %d%%  Nav: ↑ → ↓ ← ❘ Play: ⏎ ❘ ▶/⏸ : spcbar ❘ Vol: PgUp/PgDn ❘ Add/Rm: F ❘ Quit: Q",
+                   "%s 🕪 %d%%  Nav: ↑ → ↓ ← ❘ Play: ⏎ ❘ ▶/⏸ : spcbar ❘ Vol: PgUp/Dn ❘ Add/Rm: F ❘🔀: S ❘ Quit: Q",
                    status_icon, volume);
         wattroff(controls_win, A_REVERSE);
         wnoutrefresh(controls_win);
@@ -368,6 +373,14 @@ void ui_loop(Node* root,
                 if (player) libvlc_audio_set_volume(player,volume);
                 handled = true;
             }
+        }
+        // Shuffle queue
+        else if (!handled && (ch=='S' || ch=='s')) {
+            if (!queueList.empty()) {
+                std::shuffle(queueList.begin(), queueList.end(), rng);
+                queueCursor = queue_top = 0;
+            }
+            handled = true;
         }
 
         if (!handled) {
