@@ -330,7 +330,7 @@ void ui_loop(Node* root,
         wattron(controls_win, A_REVERSE);
         const char* status_icon = paused ? "⏸" : " ▶";
         mvwprintw(controls_win, 0, 1,
-                   "%s 🕪 %d%%  Navigate: ↑ → ↓ ← ❘ Play: ⏎ ❘ ▶/⏸ : spcbar ❘ Vol: PgUp/PgDn ❘ Add/Rm: F ❘ Quit: Q",
+                   "%s 🕪 %d%%  Nav: ↑ → ↓ ← ❘ Play: ⏎ ❘ ▶/⏸ : spcbar ❘ Vol: PgUp/PgDn ❘ Add/Rm: F ❘ Quit: Q",
                    status_icon, volume);
         wattroff(controls_win, A_REVERSE);
         wnoutrefresh(controls_win);
