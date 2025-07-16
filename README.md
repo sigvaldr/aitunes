@@ -1,13 +1,12 @@
-
 <h1 align="center">
   <br>
-  <a href="http://www.amitmerchant.com/electron-markdownify"><img src="https://raw.githubusercontent.com/amitmerchant1990/electron-markdownify/master/app/img/markdownify.png" alt="Markdownify" width="200"></a>
+  <img src="https://raw.githubusercontent.com/sigvaldr/aitunes/refs/heads/master/logo.png" alt="aiTunes" width="200">
   <br>
-  Markdownify
+  aiTunes
   <br>
 </h1>
 
-<h4 align="center">A minimal Markdown Editor desktop app built on top of <a href="http://electron.atom.io" target="_blank">Electron</a>.</h4>
+<h4 align="center">A terminal-based music player, with 99% of the source being written by ChatGPT</h4>
 
 <p align="center">
   <a href="https://badge.fury.io/js/electron-markdownify">
@@ -36,22 +35,22 @@
 
 ## Key Features
 
-* LivePreview - Make changes, See changes
+- LivePreview - Make changes, See changes
   - Instantly see what your Markdown documents look like in HTML as you create them.
-* Sync Scrolling
+- Sync Scrolling
   - While you type, LivePreview will automatically scroll to the current location you're editing.
-* GitHub Flavored Markdown  
-* Syntax highlighting
-* [KaTeX](https://khan.github.io/KaTeX/) Support
-* Dark/Light mode
-* Toolbar for basic Markdown formatting
-* Supports multiple cursors
-* Save the Markdown preview as PDF
-* Emoji support in preview :tada:
-* App will keep alive in tray for quick usage
-* Full screen mode
+- GitHub Flavored Markdown
+- Syntax highlighting
+- [KaTeX](https://khan.github.io/KaTeX/) Support
+- Dark/Light mode
+- Toolbar for basic Markdown formatting
+- Supports multiple cursors
+- Save the Markdown preview as PDF
+- Emoji support in preview :tada:
+- App will keep alive in tray for quick usage
+- Full screen mode
   - Write distraction free.
-* Cross platform
+- Cross platform
   - Windows, macOS and Linux ready.
 
 ## How To Use
@@ -74,7 +73,6 @@ $ npm start
 
 > **Note**
 > If you're using Linux Bash for Windows, [see this guide](https://www.howtogeek.com/261575/how-to-run-graphical-linux-desktop-applications-from-windows-10s-bash-shell/) or use `node` from the command prompt.
-
 
 ## Download
 
@@ -120,5 +118,3 @@ MIT
 > [amitmerchant.com](https://www.amitmerchant.com) &nbsp;&middot;&nbsp;
 > GitHub [@amitmerchant1990](https://github.com/amitmerchant1990) &nbsp;&middot;&nbsp;
 > Twitter [@amit_merchant](https://twitter.com/amit_merchant)
-
-
