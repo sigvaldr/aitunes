@@ -38,19 +38,78 @@
   - Uses dr_mp3 for MP3 decoding and miniaudio for audio output
   - No heavy dependencies like libvlc
 - Terminal-based interface
-  - Full ncurses-based TUI with tree navigation
+  - Full PDCurses-based TUI with tree navigation (Windows) / ncurses-based TUI (Linux/macOS)
   - Queue management and shuffle functionality
 
 ## How To Use
 
 ### Prerequisites
 
+#### Windows
+- Visual Studio 2019 or later with C++ support, OR MinGW-w64
+- Git (for vcpkg installation)
+- CMake (optional, for CMake build)
+
+#### Linux
 - libcurl development headers
+- ncurses development headers
 - ALSA development headers (for Linux audio)
 - pthread (usually included with gcc)
-- (No need for system ncurses or curses: PDCurses is included and built automatically)
+
+#### macOS
+- Xcode Command Line Tools
+- Homebrew (recommended for dependencies)
 
 ### Building
+
+#### Windows 10/11
+
+**Option 1: Automated Build (Recommended)**
+1. Clone the repository
+2. Run the automated build script:
+   ```cmd
+   build_windows.bat
+   ```
+   This script will:
+   - Install vcpkg if not present
+   - Install all required dependencies
+   - Download header files
+   - Build using both CMake and direct g++ compilation
+
+**Option 2: Manual Build**
+1. Install vcpkg:
+   ```cmd
+   git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+   C:\vcpkg\bootstrap-vcpkg.bat
+   C:\vcpkg\vcpkg integrate install
+   ```
+
+2. Install dependencies:
+   ```cmd
+   C:\vcpkg\vcpkg install curl:x64-windows
+   C:\vcpkg\vcpkg install pdcurses:x64-windows
+   C:\vcpkg\vcpkg install nlohmann-json:x64-windows
+   ```
+
+3. Download dependencies:
+   ```cmd
+   download_deps.bat
+   ```
+
+4. Build using CMake:
+   ```cmd
+   mkdir build
+   cd build
+   cmake .. -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+   cmake --build . --config Release
+   ```
+
+5. Or build directly with g++:
+   ```cmd
+   g++ src\main.cpp -o dist\aitunes.exe -std=c++17 -I"C:\vcpkg\installed\x64-windows\include" -L"C:\vcpkg\installed\x64-windows\lib" -lcurl -lpdcurses -lwinmm -lws2_32 -static-libgcc -static-libstdc++
+   ```
+
+#### Linux
 
 1. Clone the repository
 2. Run the build script:
@@ -59,21 +118,42 @@
    ./build.sh
    ```
 
-The build script will automatically download the required dr_mp3 and miniaudio headers, and build the included PDCurses library for maximum cross-platform compatibility.
+#### macOS
+
+1. Install dependencies via Homebrew:
+   ```bash
+   brew install curl ncurses nlohmann-json
+   ```
+
+2. Clone the repository and build:
+   ```bash
+   chmod +x build.sh
+   ./build.sh
+   ```
+
+The build scripts will automatically download the required dr_mp3 and miniaudio headers.
 
 ### Running
 
+#### Windows
+1. Run the compiled binary:
+   ```cmd
+   dist\aitunes.exe
+   ```
+
+#### Linux/macOS
 1. Run the compiled binary:
    ```bash
    ./dist/aitunes
    ```
 
-2. On first run, you'll be prompted to enter your Jellyfin server details:
+#### First Run Setup
+1. On first run, you'll be prompted to enter your Jellyfin server details:
    - Server URL
    - Username
    - Password
 
-3. The app will authenticate and load your music library.
+2. The app will authenticate and load your music library.
 
 ### Controls
 
@@ -86,7 +166,7 @@ The build script will automatically download the required dr_mp3 and miniaudio h
 
 ## Download
 
-You can [download](https://github.com/sigvaldr/aitunes/releases/) the latest installable version of aiTunes for Linux. (Windows and macOS soon™️)
+You can [download](https://github.com/sigvaldr/aitunes/releases/) the latest installable version of aiTunes for Linux. Windows and macOS builds are now available through the automated build process.
 
 ## Emailware
 

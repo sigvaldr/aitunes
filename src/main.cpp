@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <random>
-#include <locale.h>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -18,7 +17,7 @@
 #include <chrono>
 
 #include <curl/curl.h>
-#include "../vendor/PDCurses/curses.h"
+#include <curses.h>
 #include <nlohmann/json.hpp>
 
 // dr_mp3 and miniaudio includes
@@ -419,7 +418,6 @@ enum Focus { TREE_FOCUSED, QUEUE_FOCUSED };
 void ui_loop(Node* root,
              const std::string& base,
              const std::string& token) {
-    setlocale(LC_ALL, "");
     initscr();
 
     // ── New Theme: text=CYAN on BLACK, controls text=BLACK on CYAN ────────────

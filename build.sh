@@ -9,19 +9,11 @@ if [ ! -f "include/dr_mp3.h" ] || [ ! -f "include/miniaudio.h" ]; then
     ./download_deps.sh
 fi
 
-# Build PDCurses X11 if not already built
-if [ ! -f "vendor/PDCurses/x11/libXCurses.a" ]; then
-    echo "Building PDCurses (X11 backend)..."
-    (cd vendor/PDCurses/x11 && ./configure --disable-shared && make)
-fi
-
 echo "Compiling for linux..."
 g++ src/main.cpp -o dist/aitunes \
   -std=c++17 \
   $(pkg-config --cflags --libs libcurl) \
-  -Ivendor/PDCurses \
-  vendor/PDCurses/x11/libXCurses.a \
+  -lncurses \
   -lpthread \
-  -lasound \
-  -lX11 -lXt -lXaw -lXmu -lXpm -lSM -lICE -lXext 
+  -lasound
 echo "Done"
