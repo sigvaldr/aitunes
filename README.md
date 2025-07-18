@@ -34,10 +34,55 @@
 
 - Cross platform
   - Windows, macOS and Linux ready.
+- Lightweight audio playback
+  - Uses dr_mp3 for MP3 decoding and miniaudio for audio output
+  - No heavy dependencies like libvlc
+- Terminal-based interface
+  - Full ncurses-based TUI with tree navigation
+  - Queue management and shuffle functionality
 
 ## How To Use
 
-ToDo
+### Prerequisites
+
+- libcurl development headers
+- ncurses development headers
+- ALSA development headers (for Linux audio)
+- pthread (usually included with gcc)
+
+### Building
+
+1. Clone the repository
+2. Run the build script:
+   ```bash
+   chmod +x build.sh
+   ./build.sh
+   ```
+
+The build script will automatically download the required dr_mp3 and miniaudio headers.
+
+### Running
+
+1. Run the compiled binary:
+   ```bash
+   ./dist/aitunes
+   ```
+
+2. On first run, you'll be prompted to enter your Jellyfin server details:
+   - Server URL
+   - Username
+   - Password
+
+3. The app will authenticate and load your music library.
+
+### Controls
+
+- **Navigation**: Arrow keys to move, Enter to expand/collapse folders
+- **Playback**: Enter to play a track, Space to pause/resume
+- **Volume**: Page Up/Down to adjust volume
+- **Queue**: F to add tracks to queue, Tab to switch focus
+- **Shuffle**: S to shuffle the queue
+- **Quit**: Q to exit
 
 ## Download
 

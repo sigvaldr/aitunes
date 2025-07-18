@@ -11,15 +11,200 @@
 #include <cstdlib>
 #include <random>
 #include <locale.h>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <chrono>
 
 #include <curl/curl.h>
 #include <ncurses.h>
-#include <vlc/vlc.h>
 #include <nlohmann/json.hpp>
+
+// dr_mp3 and miniaudio includes
+#define DR_MP3_IMPLEMENTATION
+#include "../include/dr_mp3.h"
+#define MINIAUDIO_IMPLEMENTATION
+#include "../include/miniaudio.h"
 
 using json = nlohmann::json;
 
-const std::string VERSION = "1.0";
+const std::string VERSION = "2.0";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio playback system
+// ─────────────────────────────────────────────────────────────────────────────
+
+class AudioPlayer {
+private:
+    ma_device device;
+    ma_decoder decoder;
+    std::atomic<bool> is_playing{false};
+    std::atomic<bool> is_paused{false};
+    std::atomic<float> volume{1.0f};
+    std::atomic<bool> should_stop{false};
+    std::thread playback_thread;
+    std::mutex decoder_mutex;
+    std::condition_variable cv;
+    std::vector<float> audio_buffer;
+    std::string current_url;
+    
+    static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
+        AudioPlayer* player = static_cast<AudioPlayer*>(pDevice->pUserData);
+        player->fill_buffer(pOutput, frameCount);
+    }
+    
+    void fill_buffer(void* pOutput, ma_uint32 frameCount) {
+        std::lock_guard<std::mutex> lock(decoder_mutex);
+        
+        if (!is_playing || is_paused) {
+            memset(pOutput, 0, frameCount * device.playback.channels * sizeof(float));
+            return;
+        }
+        
+        ma_uint64 framesRead;
+        ma_result result = ma_decoder_read_pcm_frames(&decoder, pOutput, frameCount, &framesRead);
+        
+        if (framesRead < frameCount) {
+            // End of track
+            is_playing = false;
+            memset(static_cast<char*>(pOutput) + framesRead * device.playback.channels * sizeof(float), 
+                   0, (frameCount - framesRead) * device.playback.channels * sizeof(float));
+        }
+        
+        // Apply volume
+        float* samples = static_cast<float*>(pOutput);
+        for (ma_uint32 i = 0; i < frameCount * device.playback.channels; ++i) {
+            samples[i] *= volume.load();
+        }
+    }
+    
+    static size_t curl_write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
+        std::vector<char>* buffer = static_cast<std::vector<char>*>(userp);
+        size_t total_size = size * nmemb;
+        buffer->insert(buffer->end(), static_cast<char*>(contents), 
+                      static_cast<char*>(contents) + total_size);
+        return total_size;
+    }
+    
+    bool download_and_decode(const std::string& url) {
+        CURL* curl = curl_easy_init();
+        if (!curl) return false;
+        
+        std::vector<char> audio_data;
+        
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &audio_data);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        
+        CURLcode res = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+        
+        if (res != CURLE_OK || audio_data.empty()) {
+            return false;
+        }
+        
+        // Decode MP3 data
+        std::lock_guard<std::mutex> lock(decoder_mutex);
+        
+        ma_decoder_uninit(&decoder);
+        
+        ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 44100);
+        ma_result result = ma_decoder_init_memory(audio_data.data(), audio_data.size(), &decoderConfig, &decoder);
+        if (result != MA_SUCCESS) {
+            return false;
+        }
+        
+        return true;
+    }
+
+public:
+    AudioPlayer() {
+        ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
+        deviceConfig.playback.format = ma_format_f32;
+        deviceConfig.playback.channels = 2;
+        deviceConfig.sampleRate = 44100;
+        deviceConfig.dataCallback = data_callback;
+        deviceConfig.pUserData = this;
+        
+        if (ma_device_init(nullptr, &deviceConfig, &device) != MA_SUCCESS) {
+            throw std::runtime_error("Failed to initialize audio device");
+        }
+        
+        // Initialize decoder with empty data
+        ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 44100);
+        ma_decoder_init_memory(nullptr, 0, &decoderConfig, &decoder);
+    }
+    
+    ~AudioPlayer() {
+        stop();
+        ma_decoder_uninit(&decoder);
+        ma_device_uninit(&device);
+    }
+    
+    bool play(const std::string& url) {
+        if (url == current_url && is_playing) {
+            return true; // Already playing this track
+        }
+        
+        stop();
+        
+        if (!download_and_decode(url)) {
+            return false;
+        }
+        
+        current_url = url;
+        is_playing = true;
+        is_paused = false;
+        
+        if (ma_device_start(&device) != MA_SUCCESS) {
+            is_playing = false;
+            return false;
+        }
+        
+        return true;
+    }
+    
+    void stop() {
+        is_playing = false;
+        is_paused = false;
+        should_stop = true;
+        
+        ma_device_stop(&device);
+        current_url.clear();
+    }
+    
+    void pause() {
+        is_paused = true;
+    }
+    
+    void resume() {
+        is_paused = false;
+    }
+    
+    void set_volume(int vol) {
+        volume.store(vol / 100.0f);
+    }
+    
+    bool is_track_playing() const {
+        return is_playing && !is_paused;
+    }
+    
+    bool is_track_paused() const {
+        return is_playing && is_paused;
+    }
+    
+    bool is_track_finished() const {
+        return !is_playing && !current_url.empty() && !is_paused;
+    }
+    
+    const std::string& get_current_url() const {
+        return current_url;
+    }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Data structures
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,8 +461,7 @@ void ui_loop(Node* root,
     std::random_device rd;
     std::mt19937 rng(rd());
 
-    libvlc_instance_t* vlc    = libvlc_new(0,nullptr);
-    libvlc_media_player_t* player = nullptr;
+    std::unique_ptr<AudioPlayer> player = std::make_unique<AudioPlayer>();
     Node* playing_node = nullptr;
 
     auto draw_ui = [&]() {
@@ -375,12 +559,12 @@ void ui_loop(Node* root,
         // Volume ↑/↓
         if (ch == KEY_PPAGE) {
             volume = std::min(100, volume + 5);
-            if (player) libvlc_audio_set_volume(player, volume);
+            player->set_volume(volume);
             handled = true;
         }
         else if (ch == KEY_NPAGE) {
             volume = std::max(0, volume - 5);
-            if (player) libvlc_audio_set_volume(player, volume);
+            player->set_volume(volume);
             handled = true;
         }
         // Ctrl + ↑/↓ fallback
@@ -391,7 +575,7 @@ void ui_loop(Node* root,
             if (s1=='[' && s2=='1' && s3==';' && s4=='5' && (s5=='A'||s5=='B')) {
                 if (s5=='A') volume = std::min(100,volume+5);
                 else          volume = std::max(0,volume-5);
-                if (player) libvlc_audio_set_volume(player,volume);
+                player->set_volume(volume);
                 handled = true;
             }
         }
@@ -407,7 +591,11 @@ void ui_loop(Node* root,
         if (!handled) {
             if (ch==' ' && player) {
                 paused = !paused;
-                libvlc_media_player_set_pause(player, paused?1:0);
+                if (paused) {
+                    player->pause();
+                } else {
+                    player->resume();
+                }
             }
             else if (ch=='\t') {
                 focus = (focus==TREE_FOCUSED ? QUEUE_FOCUSED : TREE_FOCUSED);
@@ -439,16 +627,12 @@ void ui_loop(Node* root,
                     break;
                   case '\n':
                     if(cur->track){
-                      if(player) libvlc_media_player_stop(player);
                       std::string url=base+"/Audio/"+cur->track->id
                         +"/universal?AudioCodec=mp3&Container=mp3&api_key="+token;
-                      auto m=libvlc_media_new_location(vlc,url.c_str());
-                      player=libvlc_media_player_new_from_media(m);
-                      libvlc_media_release(m);
-                      libvlc_media_player_play(player);
-                      libvlc_audio_set_volume(player,volume);
-                      paused=false;
-                      playing_node=cur;
+                      if (player->play(url)) {
+                          paused = false;
+                          playing_node = cur;
+                      }
                     }
                     break;
                 }
@@ -459,16 +643,12 @@ void ui_loop(Node* root,
                   case '\n':
                     if(!queueList.empty()){
                       Node* cur=queueList[queueCursor];
-                      if(player) libvlc_media_player_stop(player);
                       std::string url=base+"/Audio/"+cur->track->id
                         +"/universal?AudioCodec=mp3&Container=mp3&api_key="+token;
-                      auto m=libvlc_media_new_location(vlc,url.c_str());
-                      player=libvlc_media_player_new_from_media(m);
-                      libvlc_media_release(m);
-                      libvlc_media_player_play(player);
-                      libvlc_audio_set_volume(player,volume);
-                      paused=false;
-                      playing_node=cur;
+                      if (player->play(url)) {
+                          paused = false;
+                          playing_node = cur;
+                      }
                     }
                     break;
                 }
@@ -476,25 +656,18 @@ void ui_loop(Node* root,
         }
 
         // auto-advance
-        if(player){
-            auto state=libvlc_media_player_get_state(player);
-            if(state==libvlc_Ended){
-                if(!queueList.empty() && queueList.front()==playing_node){
-                    queueList.erase(queueList.begin());
-                    if(queueCursor>0) --queueCursor;
-                }
-                if(!queueList.empty()){
-                    Node* next=queueList.front();
-                    libvlc_media_player_stop(player);
-                    std::string url=base+"/Audio/"+next->track->id
-                      +"/universal?AudioCodec=mp3&Container=mp3&api_key="+token;
-                    auto m=libvlc_media_new_location(vlc,url.c_str());
-                    player=libvlc_media_player_new_from_media(m);
-                    libvlc_media_release(m);
-                    libvlc_media_player_play(player);
-                    libvlc_audio_set_volume(player,volume);
-                    paused=false;
-                    playing_node=next;
+        if (player->is_track_finished()) {
+            if(!queueList.empty() && queueList.front()==playing_node){
+                queueList.erase(queueList.begin());
+                if(queueCursor>0) --queueCursor;
+            }
+            if(!queueList.empty()){
+                Node* next=queueList.front();
+                std::string url=base+"/Audio/"+next->track->id
+                  +"/universal?AudioCodec=mp3&Container=mp3&api_key="+token;
+                if (player->play(url)) {
+                    paused = false;
+                    playing_node = next;
                 }
             }
         }
@@ -513,11 +686,6 @@ void ui_loop(Node* root,
         if(ch=='q') break;
     }
 
-    if(player){
-        libvlc_media_player_stop(player);
-        libvlc_media_player_release(player);
-    }
-    libvlc_release(vlc);
     endwin();
 }
 
