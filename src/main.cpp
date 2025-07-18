@@ -18,7 +18,7 @@
 #include <chrono>
 
 #include <curl/curl.h>
-#include <ncurses.h>
+#include "../vendor/PDCurses/curses.h"
 #include <nlohmann/json.hpp>
 
 // dr_mp3 and miniaudio includes

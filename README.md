@@ -46,9 +46,9 @@
 ### Prerequisites
 
 - libcurl development headers
-- ncurses development headers
 - ALSA development headers (for Linux audio)
 - pthread (usually included with gcc)
+- (No need for system ncurses or curses: PDCurses is included and built automatically)
 
 ### Building
 
@@ -59,7 +59,7 @@
    ./build.sh
    ```
 
-The build script will automatically download the required dr_mp3 and miniaudio headers.
+The build script will automatically download the required dr_mp3 and miniaudio headers, and build the included PDCurses library for maximum cross-platform compatibility.
 
 ### Running
 
