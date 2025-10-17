@@ -123,12 +123,23 @@ struct App {
     _stream: Option<OutputStream>,
     loading_state: LoadingState,
     is_paused: bool,
+    queue: Vec<JellyfinItem>,
+    queue_state: ListState,
+    current_time: u64, // Current playback time in milliseconds
+    volume: f32, // Volume level 0.0 to 1.0
+    active_panel: ActivePanel,
 }
 
 #[derive(Debug, Clone)]
 enum LoadingState {
     NotLoading,
     LoadingSongs { progress: usize, total: usize },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ActivePanel {
+    Library,
+    Queue,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -158,6 +169,11 @@ impl App {
             _stream: None,
             loading_state: LoadingState::NotLoading,
             is_paused: false,
+            queue: Vec::new(),
+            queue_state: ListState::default(),
+            current_time: 0,
+            volume: 0.8, // Default to 80% volume
+            active_panel: ActivePanel::Library,
         }
     }
 
@@ -572,10 +588,12 @@ impl App {
         };
         
         sink.append(source);
+        sink.set_volume(self.volume);
         
         self.sink = Some(sink);
         self._stream = Some(_stream);
         self.current_song = Some(song.clone());
+        self.current_time = 0;
 
         Ok(())
     }
@@ -598,6 +616,118 @@ impl App {
                 sink.pause();
                 self.is_paused = true;
             }
+        }
+    }
+    
+    fn add_to_queue(&mut self, song: JellyfinItem) {
+        self.queue.push(song);
+        if self.queue_state.selected().is_none() && !self.queue.is_empty() {
+            self.queue_state.select(Some(0));
+        }
+    }
+    
+    fn remove_from_queue(&mut self, index: usize) {
+        if index < self.queue.len() {
+            self.queue.remove(index);
+            if self.queue.is_empty() {
+                self.queue_state.select(None);
+            } else if let Some(selected) = self.queue_state.selected() {
+                if selected >= self.queue.len() {
+                    self.queue_state.select(Some(self.queue.len() - 1));
+                }
+            }
+        }
+    }
+    
+    fn clear_queue(&mut self) {
+        self.queue.clear();
+        self.queue_state.select(None);
+    }
+    
+    fn set_volume(&mut self, volume: f32) {
+        self.volume = volume.clamp(0.0, 1.0);
+        if let Some(ref sink) = self.sink {
+            sink.set_volume(self.volume);
+        }
+    }
+    
+    fn adjust_volume(&mut self, delta: f32) {
+        self.set_volume(self.volume + delta);
+    }
+    
+    fn format_time(&self, milliseconds: u64) -> String {
+        let total_seconds = milliseconds / 1000;
+        let minutes = total_seconds / 60;
+        let seconds = total_seconds % 60;
+        format!("{:02}:{:02}", minutes, seconds)
+    }
+    
+    fn get_current_song_duration(&self) -> Option<u64> {
+        self.current_song.as_ref()
+            .and_then(|song| song.run_time_ticks)
+            .map(|ticks| ticks / 10_000) // Convert ticks to milliseconds
+    }
+    
+    fn switch_panel(&mut self) {
+        self.active_panel = match self.active_panel {
+            ActivePanel::Library => ActivePanel::Queue,
+            ActivePanel::Queue => ActivePanel::Library,
+        };
+    }
+    
+    fn toggle_queue_item(&mut self) {
+        match self.active_panel {
+            ActivePanel::Library => {
+                if let Some(selected) = self.list_state.selected() {
+                    if let Some(node) = self.flat_library.get(selected) {
+                        if let LibraryItem::Song(song) = &node.item {
+                            // Check if song is already in queue
+                            if let Some(queue_index) = self.queue.iter().position(|q| q.id == song.id) {
+                                self.remove_from_queue(queue_index);
+                            } else {
+                                self.add_to_queue(song.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            ActivePanel::Queue => {
+                if let Some(selected) = self.queue_state.selected() {
+                    self.remove_from_queue(selected);
+                }
+            }
+        }
+    }
+    
+    fn navigate_queue_up(&mut self) {
+        if !self.queue.is_empty() {
+            let i = match self.queue_state.selected() {
+                Some(i) => {
+                    if i == 0 {
+                        self.queue.len() - 1
+                    } else {
+                        i - 1
+                    }
+                }
+                None => 0,
+            };
+            self.queue_state.select(Some(i));
+        }
+    }
+    
+    fn navigate_queue_down(&mut self) {
+        if !self.queue.is_empty() {
+            let i = match self.queue_state.selected() {
+                Some(i) => {
+                    if i >= self.queue.len() - 1 {
+                        0
+                    } else {
+                        i + 1
+                    }
+                }
+                None => 0,
+            };
+            self.queue_state.select(Some(i));
         }
     }
 
@@ -640,78 +770,106 @@ impl App {
         }
     }
 
-    fn navigate_down(&mut self) {
-        if !self.flat_library.is_empty() {
-            let i = match self.list_state.selected() {
-                Some(i) => {
-                    if i >= self.flat_library.len() - 1 {
-                        0
-                    } else {
-                        i + 1
-                    }
+    fn navigate_up(&mut self) {
+        match self.active_panel {
+            ActivePanel::Library => {
+                if !self.flat_library.is_empty() {
+                    let i = match self.list_state.selected() {
+                        Some(i) => {
+                            if i == 0 {
+                                self.flat_library.len() - 1
+                            } else {
+                                i - 1
+                            }
+                        }
+                        None => 0,
+                    };
+                    self.list_state.select(Some(i));
                 }
-                None => 0,
-            };
-            self.list_state.select(Some(i));
+            }
+            ActivePanel::Queue => {
+                self.navigate_queue_up();
+            }
         }
     }
-
-    fn navigate_up(&mut self) {
-        if !self.flat_library.is_empty() {
-            let i = match self.list_state.selected() {
-                Some(i) => {
-                    if i == 0 {
-                        self.flat_library.len() - 1
-                    } else {
-                        i - 1
-                    }
+    
+    fn navigate_down(&mut self) {
+        match self.active_panel {
+            ActivePanel::Library => {
+                if !self.flat_library.is_empty() {
+                    let i = match self.list_state.selected() {
+                        Some(i) => {
+                            if i >= self.flat_library.len() - 1 {
+                                0
+                            } else {
+                                i + 1
+                            }
+                        }
+                        None => 0,
+                    };
+                    self.list_state.select(Some(i));
                 }
-                None => 0,
-            };
-            self.list_state.select(Some(i));
+            }
+            ActivePanel::Queue => {
+                self.navigate_queue_down();
+            }
         }
     }
     
     fn navigate_right(&mut self) {
-        if let Some(selected) = self.list_state.selected() {
-            if let Some(node) = self.flat_library.get(selected) {
-                match &node.item {
-                    LibraryItem::Artist(_) | LibraryItem::Album(_, _) => {
-                        // Find the corresponding node in the tree and expand it
-                        self.expand_node_in_tree(selected);
-                        self.flatten_library();
-                        
-                        // Adjust selection if needed
-                        if selected >= self.flat_library.len() {
-                            self.list_state.select(Some(self.flat_library.len() - 1));
+        match self.active_panel {
+            ActivePanel::Library => {
+                if let Some(selected) = self.list_state.selected() {
+                    if let Some(node) = self.flat_library.get(selected) {
+                        match &node.item {
+                            LibraryItem::Artist(_) | LibraryItem::Album(_, _) => {
+                                // Find the corresponding node in the tree and expand it
+                                self.expand_node_in_tree(selected);
+                                self.flatten_library();
+                                
+                                // Adjust selection if needed
+                                if selected >= self.flat_library.len() {
+                                    self.list_state.select(Some(self.flat_library.len() - 1));
+                                }
+                            }
+                            LibraryItem::Song(_) => {
+                                // Songs can't be expanded
+                            }
                         }
                     }
-                    LibraryItem::Song(_) => {
-                        // Songs can't be expanded
-                    }
                 }
+            }
+            ActivePanel::Queue => {
+                // Queue doesn't have expandable items
             }
         }
     }
     
     fn navigate_left(&mut self) {
-        if let Some(selected) = self.list_state.selected() {
-            if let Some(node) = self.flat_library.get(selected) {
-                match &node.item {
-                    LibraryItem::Album(_, _) | LibraryItem::Song(_) => {
-                        // Find the corresponding node in the tree and collapse it
-                        self.collapse_node_in_tree(selected);
-                        self.flatten_library();
-                        
-                        // Adjust selection if needed
-                        if selected >= self.flat_library.len() {
-                            self.list_state.select(Some(self.flat_library.len() - 1));
+        match self.active_panel {
+            ActivePanel::Library => {
+                if let Some(selected) = self.list_state.selected() {
+                    if let Some(node) = self.flat_library.get(selected) {
+                        match &node.item {
+                            LibraryItem::Album(_, _) | LibraryItem::Song(_) => {
+                                // Find the corresponding node in the tree and collapse it
+                                self.collapse_node_in_tree(selected);
+                                self.flatten_library();
+                                
+                                // Adjust selection if needed
+                                if selected >= self.flat_library.len() {
+                                    self.list_state.select(Some(self.flat_library.len() - 1));
+                                }
+                            }
+                            LibraryItem::Artist(_) => {
+                                // Artists can't be collapsed further - do nothing
+                            }
                         }
                     }
-                    LibraryItem::Artist(_) => {
-                        // Artists can't be collapsed further
-                    }
                 }
+            }
+            ActivePanel::Queue => {
+                // Queue doesn't have collapsible items
             }
         }
     }
@@ -809,7 +967,7 @@ fn ui(f: &mut Frame, app: &App) {
             [
                 Constraint::Length(3),
                 Constraint::Min(0),
-                Constraint::Length(3),
+                Constraint::Length(1),
             ]
             .as_ref(),
         )
@@ -830,7 +988,7 @@ fn ui(f: &mut Frame, app: &App) {
         InputMode::SongList => {
             match &app.loading_state {
                 LoadingState::NotLoading => {
-                    render_song_list(f, chunks[1], app);
+                    render_main_content(f, chunks[1], app);
                 }
                 LoadingState::LoadingSongs { progress, total } => {
                     render_loading_screen(f, chunks[1], *progress, *total);
@@ -839,26 +997,8 @@ fn ui(f: &mut Frame, app: &App) {
         }
     }
 
-    // Status bar
-    let status_text = match app.input_mode {
-        InputMode::ServerUrl => "Enter Jellyfin server URL (e.g., http://localhost:8096)".to_string(),
-        InputMode::Username => "Enter username".to_string(),
-        InputMode::Password => "Enter password".to_string(),
-        InputMode::SongList => {
-            if let Some(ref song) = app.current_song {
-                let status = if app.is_paused { "Paused" } else { "Now playing" };
-                format!("{}: {} - {}", status, song.name, song.album_artist.as_deref().unwrap_or("Unknown"))
-            } else {
-                "Select a song and press Enter to play".to_string()
-            }
-        }
-    };
-
-    let status = Paragraph::new(status_text)
-        .style(Style::default().fg(Color::Cyan))
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
-    f.render_widget(status, chunks[2]);
+    // Enhanced status bar
+    render_status_bar(f, chunks[2], app);
 }
 
 fn render_login_screen(f: &mut Frame, area: Rect, app: &App) {
@@ -936,6 +1076,16 @@ fn render_loading_screen(f: &mut Frame, area: Rect, progress: usize, total: usiz
     f.render_widget(loading_widget, area);
 }
 
+fn render_main_content(f: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
+        .split(area);
+
+    render_song_list(f, chunks[0], app);
+    render_queue(f, chunks[1], app);
+}
+
 fn render_song_list(f: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = app
         .flat_library
@@ -994,10 +1144,90 @@ fn render_song_list(f: &mut Frame, area: Rect, app: &App) {
 
     let songs_list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("Music Library"))
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-        .highlight_symbol("▶ ");
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     f.render_stateful_widget(songs_list, area, &mut app.list_state.clone());
+}
+
+fn render_queue(f: &mut Frame, area: Rect, app: &App) {
+    let items: Vec<ListItem> = app
+        .queue
+        .iter()
+        .enumerate()
+        .map(|(i, song)| {
+            let duration = if let Some(ticks) = song.run_time_ticks {
+                let seconds = ticks / 10_000_000;
+                let minutes = seconds / 60;
+                let remaining_seconds = seconds % 60;
+                format!("{:02}:{:02}", minutes, remaining_seconds)
+            } else {
+                "Unknown".to_string()
+            };
+            
+            let artist = song.album_artist.as_deref().unwrap_or("Unknown Artist");
+            
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("{}. {}", i + 1, song.name),
+                    Style::default().fg(Color::White),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    format!("[{}]", artist),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    format!("({})", duration),
+                    Style::default().fg(Color::Blue),
+                ),
+            ]))
+        })
+        .collect();
+
+    let queue_list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title("Queue"))
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    f.render_stateful_widget(queue_list, area, &mut app.queue_state.clone());
+}
+
+fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
+    // Create a single line status bar
+    let song_info = if let Some(ref song) = app.current_song {
+        let artist = song.album_artist.as_deref().unwrap_or("Unknown Artist");
+        format!("{} - {}", song.name, artist)
+    } else {
+        "No song playing".to_string()
+    };
+
+    let play_pause_text = if app.current_song.is_some() {
+        if app.is_paused { "⏸️" } else { "▶️" }
+    } else {
+        "⏹️"
+    };
+
+    let time_text = if let Some(ref _song) = app.current_song {
+        let current_time_str = app.format_time(app.current_time);
+        let total_duration = app.get_current_song_duration()
+            .map(|d| app.format_time(d))
+            .unwrap_or_else(|| "Unknown".to_string());
+        format!("{} / {}", current_time_str, total_duration)
+    } else {
+        "00:00 / 00:00".to_string()
+    };
+
+    let volume_percent = (app.volume * 100.0) as u32;
+    let volume_text = format!("🔊 {}%", volume_percent);
+
+    let status_text = format!("{} {}     |     {}     |     {}", 
+        play_pause_text, song_info, time_text, volume_text);
+
+    let status_widget = Paragraph::new(status_text)
+        .style(Style::default().fg(Color::White))
+        .block(Block::default().borders(Borders::ALL));
+
+    f.render_widget(status_widget, area);
 }
 
 #[tokio::main]
@@ -1041,7 +1271,26 @@ async fn main() -> Result<()> {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 match key.code {
-                    KeyCode::Char('q') => break,
+                    KeyCode::Tab => {
+                        if app.input_mode == InputMode::SongList {
+                            app.switch_panel();
+                        }
+                    }
+                    KeyCode::Char('q') => {
+                        if app.input_mode == InputMode::SongList {
+                            app.toggle_queue_item();
+                        }
+                    }
+                    KeyCode::PageUp => {
+                        if app.input_mode == InputMode::SongList {
+                            app.adjust_volume(0.1);
+                        }
+                    }
+                    KeyCode::PageDown => {
+                        if app.input_mode == InputMode::SongList {
+                            app.adjust_volume(-0.1);
+                        }
+                    }
                     KeyCode::Esc => {
                         if app.input_mode == InputMode::SongList {
                             break;
@@ -1058,6 +1307,12 @@ async fn main() -> Result<()> {
                             match c {
                                 ' ' => {
                                     app.pause_unpause();
+                                }
+                                '+' | '=' => {
+                                    app.adjust_volume(0.1);
+                                }
+                                '-' => {
+                                    app.adjust_volume(-0.1);
                                 }
                                 _ => {}
                             }
@@ -1098,9 +1353,9 @@ async fn main() -> Result<()> {
                                                 let _song_name = song.name.clone();
                                                 let song_clone = song.clone();
                                                 app.stop_current_song();
+                                                app.add_to_queue(song_clone.clone());
                                                 if let Err(e) = app.play_song(&song_clone).await {
                                                     app.error_message = Some(format!("Failed to play song: {}", e));
-                                                } else {
                                                 }
                                             }
                                             LibraryItem::Artist(_) | LibraryItem::Album(_, _) => {
