@@ -20,6 +20,6 @@ crossterm = "0.27"
 ratatui = "0.24"
 dirs = "5.0"
 base64 = "0.21"
-rodio = "0.17"
+rodio = { version = "0.17", features = ["mp3", "flac", "vorbis", "wav"] }
 url = "2.4"
 anyhow = "1.0"

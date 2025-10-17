@@ -239,39 +239,99 @@ impl App {
         let auth = self.auth.as_ref().ok_or_else(|| anyhow!("Not authenticated"))?;
         let client = Client::new();
         
-        // Get the direct URL for the song - use the correct Jellyfin streaming format
-        let stream_url = format!(
-            "{}/Audio/{}/stream",
-            self.credentials.as_ref().unwrap().server_url,
-            song.id
-        );
+        // Try different URL formats for better compatibility
+        let urls_to_try = vec![
+            format!("{}/Items/{}/Download", self.credentials.as_ref().unwrap().server_url, song.id),
+            format!("{}/Audio/{}/stream", self.credentials.as_ref().unwrap().server_url, song.id),
+            format!("{}/Audio/{}/stream?api_key={}", self.credentials.as_ref().unwrap().server_url, song.id, auth.access_token),
+        ];
 
-        eprintln!("Streaming from URL: {}", stream_url);
+        let mut audio_data = None;
 
-        // Download the audio data with proper authorization header
-        let response = client
-            .get(&stream_url)
-            .header("X-Emby-Authorization", format!("MediaBrowser Client=\"aitunes\", Device=\"Terminal\", DeviceId=\"aitunes-terminal\", Token=\"{}\", Version=\"1.0.0\"", auth.access_token))
-            .send()
-            .await?;
-        eprintln!("Stream response status: {}", response.status());
-        
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            eprintln!("Stream error: {}", error_text);
-            return Err(anyhow!("Failed to stream song: {}", error_text));
+        for url in urls_to_try {
+            eprintln!("Trying URL: {}", url);
+            
+            let response = client
+                .get(&url)
+                .header("X-Emby-Authorization", format!("MediaBrowser Client=\"aitunes\", Device=\"Terminal\", DeviceId=\"aitunes-terminal\", Token=\"{}\", Version=\"1.0.0\"", auth.access_token))
+                .send()
+                .await?;
+            
+            eprintln!("Response status: {}", response.status());
+            
+            if response.status().is_success() {
+                match response.bytes().await {
+                    Ok(data) => {
+                        eprintln!("Successfully downloaded {} bytes from {}", data.len(), url);
+                        audio_data = Some(data);
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to get bytes from {}: {}", url, e);
+                        continue;
+                    }
+                }
+            } else {
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                eprintln!("URL {} failed: {}", url, error_text);
+            }
         }
 
-        let audio_data = response.bytes().await?;
+        let audio_data = audio_data.ok_or_else(|| anyhow!("All URL formats failed"))?;
         eprintln!("Downloaded {} bytes of audio data", audio_data.len());
         
         // Create audio sink
         let (_stream, stream_handle) = OutputStream::try_default()?;
         let sink = Sink::try_new(&stream_handle)?;
         
-        // Decode and play the audio
+        // Try to decode the audio with better error handling
         let cursor = Cursor::new(audio_data.to_vec());
-        let source = Decoder::new(BufReader::new(cursor))?;
+        let source = match Decoder::new(BufReader::new(cursor)) {
+            Ok(source) => source,
+            Err(e) => {
+                eprintln!("Failed to decode audio: {}", e);
+                eprintln!("Audio data length: {} bytes", audio_data.len());
+                
+                // Try to detect the format from the first few bytes
+                if audio_data.len() >= 4 {
+                    let header = &audio_data[0..4];
+                    eprintln!("Audio header bytes: {:?}", header);
+                    
+                    // Check for common audio format signatures
+                    if header.starts_with(&[0xFF, 0xFB]) || header.starts_with(&[0xFF, 0xFA]) {
+                        eprintln!("Detected MP3 format");
+                    } else if header.starts_with(b"fLaC") {
+                        eprintln!("Detected FLAC format");
+                    } else if header.starts_with(b"OggS") {
+                        eprintln!("Detected OGG format");
+                    } else if header.starts_with(b"ID3") {
+                        eprintln!("Detected MP3 with ID3 tag");
+                    } else {
+                        eprintln!("Unknown audio format");
+                    }
+                }
+                
+                // Try alternative approach: check if it's a streaming format issue
+                // Sometimes Jellyfin returns partial data or the wrong content type
+                if audio_data.len() == 0 {
+                    return Err(anyhow!("No audio data received"));
+                }
+                
+                // Try to create a new cursor and attempt decoding again
+                let cursor2 = Cursor::new(audio_data.to_vec());
+                match Decoder::new(BufReader::new(cursor2)) {
+                    Ok(source) => {
+                        eprintln!("Second attempt at decoding succeeded");
+                        source
+                    }
+                    Err(e2) => {
+                        eprintln!("Second decode attempt also failed: {}", e2);
+                        return Err(anyhow!("Unrecognized format: {} (original: {})", e2, e));
+                    }
+                }
+            }
+        };
+        
         sink.append(source);
         
         self.sink = Some(sink);
