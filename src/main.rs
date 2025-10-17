@@ -49,6 +49,58 @@ struct JellyfinItem {
     album: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+enum LibraryItem {
+    Artist(String),
+    Album(String, String), // (artist, album)
+    Song(JellyfinItem),
+}
+
+#[derive(Debug, Clone)]
+struct LibraryNode {
+    item: LibraryItem,
+    children: Vec<LibraryNode>,
+    expanded: bool,
+}
+
+impl LibraryNode {
+    fn new(item: LibraryItem) -> Self {
+        Self {
+            item,
+            children: Vec::new(),
+            expanded: false,
+        }
+    }
+    
+    fn add_child(&mut self, child: LibraryNode) {
+        self.children.push(child);
+    }
+    
+    fn is_expanded(&self) -> bool {
+        self.expanded
+    }
+    
+    fn toggle_expansion(&mut self) {
+        self.expanded = !self.expanded;
+    }
+    
+    fn get_display_name(&self) -> String {
+        match &self.item {
+            LibraryItem::Artist(name) => name.clone(),
+            LibraryItem::Album(artist, album) => format!("{} - {}", artist, album),
+            LibraryItem::Song(song) => song.name.clone(),
+        }
+    }
+    
+    fn get_indent_level(&self) -> usize {
+        match &self.item {
+            LibraryItem::Artist(_) => 0,
+            LibraryItem::Album(_, _) => 1,
+            LibraryItem::Song(_) => 2,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct JellyfinItemsResponse {
     items: Vec<JellyfinItem>,
@@ -58,6 +110,8 @@ struct App {
     credentials: Option<Credentials>,
     auth: Option<JellyfinAuth>,
     songs: Vec<JellyfinItem>,
+    library_tree: Vec<LibraryNode>,
+    flat_library: Vec<LibraryNode>, // Flattened view for navigation
     list_state: ListState,
     input_mode: InputMode,
     server_url_input: String,
@@ -67,6 +121,14 @@ struct App {
     current_song: Option<JellyfinItem>,
     sink: Option<Sink>,
     _stream: Option<OutputStream>,
+    loading_state: LoadingState,
+    is_paused: bool,
+}
+
+#[derive(Debug, Clone)]
+enum LoadingState {
+    NotLoading,
+    LoadingSongs { progress: usize, total: usize },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +145,8 @@ impl App {
             credentials: None,
             auth: None,
             songs: Vec::new(),
+            library_tree: Vec::new(),
+            flat_library: Vec::new(),
             list_state: ListState::default(),
             input_mode: InputMode::ServerUrl,
             server_url_input: String::new(),
@@ -92,6 +156,8 @@ impl App {
             current_song: None,
             sink: None,
             _stream: None,
+            loading_state: LoadingState::NotLoading,
+            is_paused: false,
         }
     }
 
@@ -190,14 +256,18 @@ impl App {
         let auth = self.auth.as_ref().ok_or_else(|| anyhow!("Not authenticated"))?;
         let client = Client::new();
         
-        let songs_url = format!(
-            "{}/Users/{}/Items?Recursive=true&IncludeItemTypes=Audio&SortBy=Name&Limit=100",
+        // Start loading state
+        self.loading_state = LoadingState::LoadingSongs { progress: 0, total: 0 };
+        
+        // First, get the total count
+        let count_url = format!(
+            "{}/Users/{}/Items?Recursive=true&IncludeItemTypes=Audio&SortBy=Name&Limit=1",
             self.credentials.as_ref().unwrap().server_url,
             auth.user_id
         );
 
         let response = client
-            .get(&songs_url)
+            .get(&count_url)
             .header("X-Emby-Authorization", format!("MediaBrowser Client=\"aitunes\", Device=\"Terminal\", DeviceId=\"aitunes-terminal\", Token=\"{}\", Version=\"1.0.0\"", auth.access_token))
             .send()
             .await?;
@@ -207,32 +277,230 @@ impl App {
             return Err(anyhow!("Failed to load songs: {}", error_text));
         }
 
-        let songs_response: serde_json::Value = response.json().await?;
+        let count_response: serde_json::Value = response.json().await?;
+        let total_count = count_response["TotalRecordCount"].as_u64().unwrap_or(0) as usize;
         
-        if let Some(items) = songs_response["Items"].as_array() {
-            // Convert JSON items to JellyfinItem structs
-            let mut songs = Vec::new();
-            for item in items {
-                if let Ok(jellyfin_item) = serde_json::from_value::<JellyfinItem>(item.clone()) {
-                    songs.push(jellyfin_item);
-                } else {
-                    // Debug: print what failed to parse
-                    eprintln!("Failed to parse item: {:?}", item);
+        self.loading_state = LoadingState::LoadingSongs { progress: 0, total: total_count };
+        
+        // Load all songs in batches
+        let mut all_songs = Vec::new();
+        let mut start_index = 0;
+        let batch_size = 100;
+        
+        while start_index < total_count {
+            let songs_url = format!(
+                "{}/Users/{}/Items?Recursive=true&IncludeItemTypes=Audio&SortBy=Name&StartIndex={}&Limit={}",
+                self.credentials.as_ref().unwrap().server_url,
+                auth.user_id,
+                start_index,
+                batch_size
+            );
+
+            let response = client
+                .get(&songs_url)
+                .header("X-Emby-Authorization", format!("MediaBrowser Client=\"aitunes\", Device=\"Terminal\", DeviceId=\"aitunes-terminal\", Token=\"{}\", Version=\"1.0.0\"", auth.access_token))
+                .send()
+                .await?;
+
+            if !response.status().is_success() {
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(anyhow!("Failed to load songs: {}", error_text));
+            }
+
+            let songs_response: serde_json::Value = response.json().await?;
+            
+            if let Some(items) = songs_response["Items"].as_array() {
+                for item in items {
+                    if let Ok(jellyfin_item) = serde_json::from_value::<JellyfinItem>(item.clone()) {
+                        all_songs.push(jellyfin_item);
+                    }
                 }
             }
             
-            eprintln!("Loaded {} songs", songs.len());
-            self.songs = songs;
-        } else {
-            eprintln!("No Items field found in response");
-            self.songs = Vec::new();
+            start_index += batch_size;
+            self.loading_state = LoadingState::LoadingSongs { 
+                progress: start_index.min(total_count), 
+                total: total_count 
+            };
         }
         
-        if !self.songs.is_empty() {
+        self.songs = all_songs;
+        
+        // Organize songs into hierarchical structure
+        self.organize_library();
+        
+        // Stop loading state
+        self.loading_state = LoadingState::NotLoading;
+        
+        if !self.flat_library.is_empty() {
             self.list_state.select(Some(0));
         }
 
         Ok(())
+    }
+
+    async fn load_songs_with_progress(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+        let auth = self.auth.as_ref().ok_or_else(|| anyhow!("Not authenticated"))?;
+        let client = Client::new();
+        
+        // Start loading state
+        self.loading_state = LoadingState::LoadingSongs { progress: 0, total: 0 };
+        
+        // First, get the total count
+        let count_url = format!(
+            "{}/Users/{}/Items?Recursive=true&IncludeItemTypes=Audio&SortBy=Name&Limit=1",
+            self.credentials.as_ref().unwrap().server_url,
+            auth.user_id
+        );
+
+        let response = client
+            .get(&count_url)
+            .header("X-Emby-Authorization", format!("MediaBrowser Client=\"aitunes\", Device=\"Terminal\", DeviceId=\"aitunes-terminal\", Token=\"{}\", Version=\"1.0.0\"", auth.access_token))
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(anyhow!("Failed to load songs: {}", error_text));
+        }
+
+        let count_response: serde_json::Value = response.json().await?;
+        let total_count = count_response["TotalRecordCount"].as_u64().unwrap_or(0) as usize;
+        
+        self.loading_state = LoadingState::LoadingSongs { progress: 0, total: total_count };
+        
+        // Load all songs in batches
+        let mut all_songs = Vec::new();
+        let mut start_index = 0;
+        let batch_size = 100;
+        
+        while start_index < total_count {
+            // Update UI to show loading progress
+            terminal.draw(|f| ui(f, self))?;
+            
+            // Small delay to make loading visible
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            
+            let songs_url = format!(
+                "{}/Users/{}/Items?Recursive=true&IncludeItemTypes=Audio&SortBy=Name&StartIndex={}&Limit={}",
+                self.credentials.as_ref().unwrap().server_url,
+                auth.user_id,
+                start_index,
+                batch_size
+            );
+
+            let response = client
+                .get(&songs_url)
+                .header("X-Emby-Authorization", format!("MediaBrowser Client=\"aitunes\", Device=\"Terminal\", DeviceId=\"aitunes-terminal\", Token=\"{}\", Version=\"1.0.0\"", auth.access_token))
+                .send()
+                .await?;
+
+            if !response.status().is_success() {
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(anyhow!("Failed to load songs: {}", error_text));
+            }
+
+            let songs_response: serde_json::Value = response.json().await?;
+            
+            if let Some(items) = songs_response["Items"].as_array() {
+                for item in items {
+                    if let Ok(jellyfin_item) = serde_json::from_value::<JellyfinItem>(item.clone()) {
+                        all_songs.push(jellyfin_item);
+                    }
+                }
+            }
+            
+            start_index += batch_size;
+            self.loading_state = LoadingState::LoadingSongs { 
+                progress: start_index.min(total_count), 
+                total: total_count 
+            };
+        }
+        
+        self.songs = all_songs;
+        
+        // Organize songs into hierarchical structure
+        self.organize_library();
+        
+        // Stop loading state
+        self.loading_state = LoadingState::NotLoading;
+        
+        if !self.flat_library.is_empty() {
+            self.list_state.select(Some(0));
+        }
+
+        Ok(())
+    }
+
+    fn organize_library(&mut self) {
+        use std::collections::HashMap;
+        
+        // Group songs by artist and album
+        let mut artists: HashMap<String, HashMap<String, Vec<JellyfinItem>>> = HashMap::new();
+        
+        for song in &self.songs {
+            let artist = song.album_artist.as_deref().unwrap_or("Unknown Artist").to_string();
+            let album = song.album.as_deref().unwrap_or("Unknown Album").to_string();
+            
+            artists.entry(artist)
+                .or_insert_with(HashMap::new)
+                .entry(album)
+                .or_insert_with(Vec::new)
+                .push(song.clone());
+        }
+        
+        // Build hierarchical structure
+        self.library_tree.clear();
+        self.flat_library.clear();
+        
+        let mut artist_names: Vec<_> = artists.keys().collect();
+        artist_names.sort();
+        
+        for artist_name in artist_names {
+            let mut artist_node = LibraryNode::new(LibraryItem::Artist(artist_name.clone()));
+            
+            let mut album_names: Vec<_> = artists[artist_name].keys().collect();
+            album_names.sort();
+            
+            for album_name in album_names {
+                let mut album_node = LibraryNode::new(LibraryItem::Album(artist_name.clone(), album_name.clone()));
+                
+                let mut songs = artists[artist_name][album_name].clone();
+                songs.sort_by(|a, b| a.name.cmp(&b.name));
+                
+                for song in songs {
+                    let song_node = LibraryNode::new(LibraryItem::Song(song));
+                    album_node.add_child(song_node);
+                }
+                
+                artist_node.add_child(album_node);
+            }
+            
+            self.library_tree.push(artist_node);
+        }
+        
+        // Create flattened view for navigation
+        self.flatten_library();
+    }
+    
+    fn flatten_library(&mut self) {
+        self.flat_library.clear();
+        
+        for artist_node in &self.library_tree {
+            self.flat_library.push(artist_node.clone());
+            
+            if artist_node.is_expanded() {
+                for album_node in &artist_node.children {
+                    self.flat_library.push(album_node.clone());
+                    
+                    if album_node.is_expanded() {
+                        for song_node in &album_node.children {
+                            self.flat_library.push(song_node.clone());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     async fn play_song(&mut self, song: &JellyfinItem) -> Result<()> {
@@ -249,7 +517,6 @@ impl App {
         let mut audio_data = None;
 
         for url in urls_to_try {
-            eprintln!("Trying URL: {}", url);
             
             let response = client
                 .get(&url)
@@ -257,28 +524,23 @@ impl App {
                 .send()
                 .await?;
             
-            eprintln!("Response status: {}", response.status());
             
             if response.status().is_success() {
                 match response.bytes().await {
                     Ok(data) => {
-                        eprintln!("Successfully downloaded {} bytes from {}", data.len(), url);
                         audio_data = Some(data);
                         break;
                     }
-                    Err(e) => {
-                        eprintln!("Failed to get bytes from {}: {}", url, e);
+                    Err(_e) => {
                         continue;
                     }
                 }
             } else {
-                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                eprintln!("URL {} failed: {}", url, error_text);
+                let _error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
             }
         }
 
         let audio_data = audio_data.ok_or_else(|| anyhow!("All URL formats failed"))?;
-        eprintln!("Downloaded {} bytes of audio data", audio_data.len());
         
         // Create audio sink
         let (_stream, stream_handle) = OutputStream::try_default()?;
@@ -289,27 +551,6 @@ impl App {
         let source = match Decoder::new(BufReader::new(cursor)) {
             Ok(source) => source,
             Err(e) => {
-                eprintln!("Failed to decode audio: {}", e);
-                eprintln!("Audio data length: {} bytes", audio_data.len());
-                
-                // Try to detect the format from the first few bytes
-                if audio_data.len() >= 4 {
-                    let header = &audio_data[0..4];
-                    eprintln!("Audio header bytes: {:?}", header);
-                    
-                    // Check for common audio format signatures
-                    if header.starts_with(&[0xFF, 0xFB]) || header.starts_with(&[0xFF, 0xFA]) {
-                        eprintln!("Detected MP3 format");
-                    } else if header.starts_with(b"fLaC") {
-                        eprintln!("Detected FLAC format");
-                    } else if header.starts_with(b"OggS") {
-                        eprintln!("Detected OGG format");
-                    } else if header.starts_with(b"ID3") {
-                        eprintln!("Detected MP3 with ID3 tag");
-                    } else {
-                        eprintln!("Unknown audio format");
-                    }
-                }
                 
                 // Try alternative approach: check if it's a streaming format issue
                 // Sometimes Jellyfin returns partial data or the wrong content type
@@ -321,11 +562,9 @@ impl App {
                 let cursor2 = Cursor::new(audio_data.to_vec());
                 match Decoder::new(BufReader::new(cursor2)) {
                     Ok(source) => {
-                        eprintln!("Second attempt at decoding succeeded");
                         source
                     }
                     Err(e2) => {
-                        eprintln!("Second decode attempt also failed: {}", e2);
                         return Err(anyhow!("Unrecognized format: {} (original: {})", e2, e));
                     }
                 }
@@ -338,7 +577,6 @@ impl App {
         self._stream = Some(_stream);
         self.current_song = Some(song.clone());
 
-        eprintln!("Audio playback started successfully");
         Ok(())
     }
 
@@ -348,6 +586,19 @@ impl App {
         }
         self._stream = None;
         self.current_song = None;
+        self.is_paused = false;
+    }
+    
+    fn pause_unpause(&mut self) {
+        if let Some(ref sink) = self.sink {
+            if self.is_paused {
+                sink.play();
+                self.is_paused = false;
+            } else {
+                sink.pause();
+                self.is_paused = true;
+            }
+        }
     }
 
     fn next_input_mode(&mut self) {
@@ -389,11 +640,11 @@ impl App {
         }
     }
 
-    fn next_song(&mut self) {
-        if !self.songs.is_empty() {
+    fn navigate_down(&mut self) {
+        if !self.flat_library.is_empty() {
             let i = match self.list_state.selected() {
                 Some(i) => {
-                    if i >= self.songs.len() - 1 {
+                    if i >= self.flat_library.len() - 1 {
                         0
                     } else {
                         i + 1
@@ -405,12 +656,12 @@ impl App {
         }
     }
 
-    fn previous_song(&mut self) {
-        if !self.songs.is_empty() {
+    fn navigate_up(&mut self) {
+        if !self.flat_library.is_empty() {
             let i = match self.list_state.selected() {
                 Some(i) => {
                     if i == 0 {
-                        self.songs.len() - 1
+                        self.flat_library.len() - 1
                     } else {
                         i - 1
                     }
@@ -418,6 +669,134 @@ impl App {
                 None => 0,
             };
             self.list_state.select(Some(i));
+        }
+    }
+    
+    fn navigate_right(&mut self) {
+        if let Some(selected) = self.list_state.selected() {
+            if let Some(node) = self.flat_library.get(selected) {
+                match &node.item {
+                    LibraryItem::Artist(_) | LibraryItem::Album(_, _) => {
+                        // Find the corresponding node in the tree and expand it
+                        self.expand_node_in_tree(selected);
+                        self.flatten_library();
+                        
+                        // Adjust selection if needed
+                        if selected >= self.flat_library.len() {
+                            self.list_state.select(Some(self.flat_library.len() - 1));
+                        }
+                    }
+                    LibraryItem::Song(_) => {
+                        // Songs can't be expanded
+                    }
+                }
+            }
+        }
+    }
+    
+    fn navigate_left(&mut self) {
+        if let Some(selected) = self.list_state.selected() {
+            if let Some(node) = self.flat_library.get(selected) {
+                match &node.item {
+                    LibraryItem::Album(_, _) | LibraryItem::Song(_) => {
+                        // Find the corresponding node in the tree and collapse it
+                        self.collapse_node_in_tree(selected);
+                        self.flatten_library();
+                        
+                        // Adjust selection if needed
+                        if selected >= self.flat_library.len() {
+                            self.list_state.select(Some(self.flat_library.len() - 1));
+                        }
+                    }
+                    LibraryItem::Artist(_) => {
+                        // Artists can't be collapsed further
+                    }
+                }
+            }
+        }
+    }
+    
+    fn expand_node_in_tree(&mut self, flat_index: usize) {
+        if let Some(node) = self.flat_library.get(flat_index) {
+            match &node.item {
+                LibraryItem::Artist(artist_name) => {
+                    // Find and expand the artist in the tree
+                    for artist_node in &mut self.library_tree {
+                        if let LibraryItem::Artist(name) = &artist_node.item {
+                            if name == artist_name {
+                                artist_node.toggle_expansion();
+                                break;
+                            }
+                        }
+                    }
+                }
+                LibraryItem::Album(artist_name, album_name) => {
+                    // Find and expand the album in the tree
+                    for artist_node in &mut self.library_tree {
+                        if let LibraryItem::Artist(name) = &artist_node.item {
+                            if name == artist_name {
+                                for album_node in &mut artist_node.children {
+                                    if let LibraryItem::Album(_, album) = &album_node.item {
+                                        if album == album_name {
+                                            album_node.toggle_expansion();
+                                            break;
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                LibraryItem::Song(_) => {
+                    // Songs can't be expanded
+                }
+            }
+        }
+    }
+    
+    fn collapse_node_in_tree(&mut self, flat_index: usize) {
+        if let Some(node) = self.flat_library.get(flat_index) {
+            match &node.item {
+                LibraryItem::Album(artist_name, album_name) => {
+                    // Find and collapse the album in the tree
+                    for artist_node in &mut self.library_tree {
+                        if let LibraryItem::Artist(name) = &artist_node.item {
+                            if name == artist_name {
+                                for album_node in &mut artist_node.children {
+                                    if let LibraryItem::Album(_, album) = &album_node.item {
+                                        if album == album_name {
+                                            album_node.toggle_expansion();
+                                            break;
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                LibraryItem::Song(_) => {
+                    // Find and collapse the parent album
+                    for artist_node in &mut self.library_tree {
+                        for album_node in &mut artist_node.children {
+                            for song_node in &album_node.children {
+                                if let LibraryItem::Song(song) = &song_node.item {
+                                    if let LibraryItem::Song(selected_song) = &node.item {
+                                        if song.id == selected_song.id {
+                                            album_node.toggle_expansion();
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                LibraryItem::Artist(_) => {
+                    // Artists can't be collapsed further
+                }
+            }
         }
     }
 }
@@ -449,7 +828,14 @@ fn ui(f: &mut Frame, app: &App) {
             render_login_screen(f, chunks[1], app);
         }
         InputMode::SongList => {
-            render_song_list(f, chunks[1], app);
+            match &app.loading_state {
+                LoadingState::NotLoading => {
+                    render_song_list(f, chunks[1], app);
+                }
+                LoadingState::LoadingSongs { progress, total } => {
+                    render_loading_screen(f, chunks[1], *progress, *total);
+                }
+            }
         }
     }
 
@@ -460,7 +846,8 @@ fn ui(f: &mut Frame, app: &App) {
         InputMode::Password => "Enter password".to_string(),
         InputMode::SongList => {
             if let Some(ref song) = app.current_song {
-                format!("Now playing: {} - {}", song.name, song.album_artist.as_deref().unwrap_or("Unknown"))
+                let status = if app.is_paused { "Paused" } else { "Now playing" };
+                format!("{}: {} - {}", status, song.name, song.album_artist.as_deref().unwrap_or("Unknown"))
             } else {
                 "Select a song and press Enter to play".to_string()
             }
@@ -526,44 +913,87 @@ fn render_login_screen(f: &mut Frame, area: Rect, app: &App) {
     }
 }
 
+fn render_loading_screen(f: &mut Frame, area: Rect, progress: usize, total: usize) {
+    let percentage = if total > 0 { (progress * 100) / total } else { 0 };
+    let progress_text = format!("Loading songs... {} / {} ({}%)", progress, total, percentage);
+    
+    // Create a progress bar
+    let progress_width = if total > 0 { (area.width as usize * progress) / total } else { 0 };
+    let progress_bar = "█".repeat(progress_width as usize);
+    let remaining_bar = "░".repeat((area.width as usize).saturating_sub(progress_width as usize));
+    
+    let loading_widget = Paragraph::new(vec![
+        Line::from(progress_text),
+        Line::from(""),
+        Line::from(format!("{}{}", progress_bar, remaining_bar)),
+        Line::from(""),
+        Line::from("Please wait while your music library loads..."),
+    ])
+    .style(Style::default().fg(Color::Yellow))
+    .alignment(Alignment::Center)
+    .block(Block::default().borders(Borders::ALL).title("Loading Music Library"));
+    
+    f.render_widget(loading_widget, area);
+}
+
 fn render_song_list(f: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = app
-        .songs
+        .flat_library
         .iter()
-        .map(|song| {
-            let duration = if let Some(ticks) = song.run_time_ticks {
-                let seconds = ticks / 10_000_000;
-                let minutes = seconds / 60;
-                let remaining_seconds = seconds % 60;
-                format!("{:02}:{:02}", minutes, remaining_seconds)
-            } else {
-                "Unknown".to_string()
+        .map(|node| {
+            let indent = "  ".repeat(node.get_indent_level());
+            let display_name = node.get_display_name();
+            
+            let (prefix, style) = match &node.item {
+                LibraryItem::Artist(_) => {
+                    let symbol = if node.is_expanded() { "▼" } else { "▶" };
+                    (format!("{}{} ", indent, symbol), Style::default().fg(Color::Cyan))
+                }
+                LibraryItem::Album(_, _) => {
+                    let symbol = if node.is_expanded() { "▼" } else { "▶" };
+                    (format!("{}{} ", indent, symbol), Style::default().fg(Color::Green))
+                }
+                LibraryItem::Song(song) => {
+                    let duration = if let Some(ticks) = song.run_time_ticks {
+                        let seconds = ticks / 10_000_000;
+                        let minutes = seconds / 60;
+                        let remaining_seconds = seconds % 60;
+                        format!("{:02}:{:02}", minutes, remaining_seconds)
+                    } else {
+                        "Unknown".to_string()
+                    };
+                    
+                    let _artist = song.album_artist.as_deref().unwrap_or("Unknown Artist");
+                    let album = song.album.as_deref().unwrap_or("Unknown Album");
+                    
+                    return ListItem::new(Line::from(vec![
+                        Span::styled(
+                            format!("{}  {}", indent, song.name),
+                            Style::default().fg(Color::White),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            format!("[{}]", album),
+                            Style::default().fg(Color::Gray),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            format!("({})", duration),
+                            Style::default().fg(Color::Blue),
+                        ),
+                    ]));
+                }
             };
-
-            let artist = song.album_artist.as_deref().unwrap_or("Unknown Artist");
-            let album = song.album.as_deref().unwrap_or("Unknown Album");
             
             ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{} - {}", song.name, artist),
-                    Style::default().fg(Color::White),
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    format!("[{}]", album),
-                    Style::default().fg(Color::Gray),
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    format!("({})", duration),
-                    Style::default().fg(Color::Blue),
-                ),
+                Span::styled(prefix, style),
+                Span::styled(display_name, style),
             ]))
         })
         .collect();
 
     let songs_list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Songs"))
+        .block(Block::default().borders(Borders::ALL).title("Music Library"))
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
 
@@ -597,7 +1027,8 @@ async fn main() -> Result<()> {
             app.username_input.clear();
             app.password_input.clear();
         } else {
-            if let Err(e) = app.load_songs().await {
+            // Start loading and show progress
+            if let Err(e) = app.load_songs_with_progress(&mut terminal).await {
                 app.error_message = Some(format!("Failed to load songs: {}", e));
             }
         }
@@ -625,12 +1056,8 @@ async fn main() -> Result<()> {
                     KeyCode::Char(c) => {
                         if app.input_mode == InputMode::SongList {
                             match c {
-                                'j' | 's' => app.next_song(),
-                                'k' | 'w' => app.previous_song(),
                                 ' ' => {
-                                    if app.sink.is_some() {
-                                        app.stop_current_song();
-                                    }
+                                    app.pause_unpause();
                                 }
                                 _ => {}
                             }
@@ -665,16 +1092,21 @@ async fn main() -> Result<()> {
                             }
                             InputMode::SongList => {
                                 if let Some(selected) = app.list_state.selected() {
-                                    if let Some(song) = app.songs.get(selected) {
-                                        let song_name = song.name.clone();
-                                        eprintln!("Attempting to play: {}", song_name);
-                                        let song_clone = song.clone();
-                                        app.stop_current_song();
-                                        if let Err(e) = app.play_song(&song_clone).await {
-                                            eprintln!("Failed to play song: {}", e);
-                                            app.error_message = Some(format!("Failed to play song: {}", e));
-                                        } else {
-                                            eprintln!("Successfully started playing: {}", song_name);
+                                    if let Some(node) = app.flat_library.get(selected) {
+                                        match &node.item {
+                                            LibraryItem::Song(song) => {
+                                                let _song_name = song.name.clone();
+                                                let song_clone = song.clone();
+                                                app.stop_current_song();
+                                                if let Err(e) = app.play_song(&song_clone).await {
+                                                    app.error_message = Some(format!("Failed to play song: {}", e));
+                                                } else {
+                                                }
+                                            }
+                                            LibraryItem::Artist(_) | LibraryItem::Album(_, _) => {
+                                                // Expand/collapse the node
+                                                app.navigate_right();
+                                            }
                                         }
                                     }
                                 }
@@ -683,12 +1115,22 @@ async fn main() -> Result<()> {
                     }
                     KeyCode::Up => {
                         if app.input_mode == InputMode::SongList {
-                            app.previous_song();
+                            app.navigate_up();
                         }
                     }
                     KeyCode::Down => {
                         if app.input_mode == InputMode::SongList {
-                            app.next_song();
+                            app.navigate_down();
+                        }
+                    }
+                    KeyCode::Left => {
+                        if app.input_mode == InputMode::SongList {
+                            app.navigate_left();
+                        }
+                    }
+                    KeyCode::Right => {
+                        if app.input_mode == InputMode::SongList {
+                            app.navigate_right();
                         }
                     }
                     _ => {}

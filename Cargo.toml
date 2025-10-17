@@ -7,10 +7,6 @@ edition = "2021"
 name = "aitunes"
 path = "src/main.rs"
 
-[[bin]]
-name = "debug_api"
-path = "debug_api.rs"
-
 [dependencies]
 reqwest = { version = "0.11", features = ["json", "stream"] }
 tokio = { version = "1.0", features = ["full"] }
