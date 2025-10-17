@@ -128,6 +128,7 @@ struct App {
     current_time: u64, // Current playback time in milliseconds
     volume: f32, // Volume level 0.0 to 1.0
     active_panel: ActivePanel,
+    song_start_time: Option<std::time::Instant>, // When the current song started playing
 }
 
 #[derive(Debug, Clone)]
@@ -174,6 +175,7 @@ impl App {
             current_time: 0,
             volume: 0.8, // Default to 80% volume
             active_panel: ActivePanel::Library,
+            song_start_time: None,
         }
     }
 
@@ -594,6 +596,7 @@ impl App {
         self._stream = Some(_stream);
         self.current_song = Some(song.clone());
         self.current_time = 0;
+        self.song_start_time = Some(std::time::Instant::now());
 
         Ok(())
     }
@@ -605,6 +608,8 @@ impl App {
         self._stream = None;
         self.current_song = None;
         self.is_paused = false;
+        self.song_start_time = None;
+        self.current_time = 0;
     }
     
     fn pause_unpause(&mut self) {
@@ -612,9 +617,22 @@ impl App {
             if self.is_paused {
                 sink.play();
                 self.is_paused = false;
+                // Reset start time when resuming
+                self.song_start_time = Some(std::time::Instant::now());
             } else {
                 sink.pause();
                 self.is_paused = true;
+                // Update current time when pausing
+                self.update_current_time();
+            }
+        }
+    }
+    
+    fn update_current_time(&mut self) {
+        if let Some(start_time) = self.song_start_time {
+            if !self.is_paused {
+                let elapsed = start_time.elapsed();
+                self.current_time = elapsed.as_millis() as u64;
             }
         }
     }
@@ -666,6 +684,57 @@ impl App {
         self.current_song.as_ref()
             .and_then(|song| song.run_time_ticks)
             .map(|ticks| ticks / 10_000) // Convert ticks to milliseconds
+    }
+    
+    fn is_song_finished(&self) -> bool {
+        if let Some(ref sink) = self.sink {
+            sink.empty() // Returns true if the sink has no more audio to play
+        } else {
+            false
+        }
+    }
+    
+    async fn play_next_in_queue(&mut self) -> Result<()> {
+        if !self.queue.is_empty() {
+            // Find the current song in the queue and remove it
+            if let Some(ref current_song) = self.current_song {
+                if let Some(current_index) = self.queue.iter().position(|song| song.id == current_song.id) {
+                    // Remove the finished song from the queue
+                    self.queue.remove(current_index);
+                    
+                    // Adjust queue selection
+                    if self.queue.is_empty() {
+                        self.queue_state.select(None);
+                        self.stop_current_song();
+                        return Ok(());
+                    }
+                    
+                    // Play the next song (which is now at the same index)
+                    if current_index < self.queue.len() {
+                        let next_song = self.queue[current_index].clone();
+                        self.stop_current_song();
+                        self.queue_state.select(Some(current_index));
+                        self.play_song(&next_song).await?;
+                        return Ok(());
+                    } else {
+                        // If we were at the end, play the last song
+                        let last_index = self.queue.len() - 1;
+                        let next_song = self.queue[last_index].clone();
+                        self.stop_current_song();
+                        self.queue_state.select(Some(last_index));
+                        self.play_song(&next_song).await?;
+                        return Ok(());
+                    }
+                }
+            }
+            
+            // If current song not found in queue, play first in queue
+            let first_song = self.queue[0].clone();
+            self.stop_current_song();
+            self.queue_state.select(Some(0));
+            self.play_song(&first_song).await?;
+        }
+        Ok(())
     }
     
     fn switch_panel(&mut self) {
@@ -960,45 +1029,57 @@ impl App {
 }
 
 fn ui(f: &mut Frame, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(1)
-        .constraints(
-            [
-                Constraint::Length(3),
-                Constraint::Min(0),
-                Constraint::Length(1),
-            ]
-            .as_ref(),
-        )
-        .split(f.size());
+    let (main_chunk, status_chunk) = {
+        let (main_chunks, has_title) = if matches!(app.input_mode, InputMode::ServerUrl | InputMode::Username | InputMode::Password) || matches!(app.loading_state, LoadingState::LoadingSongs { .. }) {
+            (Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints([
+                    Constraint::Length(3), // Title
+                    Constraint::Min(0),   // Main
+                    Constraint::Length(3),// Status
+                ].as_ref())
+                .split(f.size()),
+            true)
+        } else {
+            (Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints([
+                    Constraint::Min(0),   // Main
+                    Constraint::Length(3),// Status
+                ].as_ref())
+                .split(f.size()),
+            false)
+        };
+        if has_title {
+            let title = Paragraph::new("🎵 aiTunes - Jellyfin Music Player")
+                .style(Style::default().fg(Color::Yellow))
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL));
+            f.render_widget(title, main_chunks[0]);
+            (main_chunks[1], main_chunks[2])
+        } else {
+            (main_chunks[0], main_chunks[1])
+        }
+    };
 
-    // Title
-    let title = Paragraph::new("🎵 aiTunes - Jellyfin Music Player")
-        .style(Style::default().fg(Color::Yellow))
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
-    f.render_widget(title, chunks[0]);
-
-    // Main content area
     match app.input_mode {
         InputMode::ServerUrl | InputMode::Username | InputMode::Password => {
-            render_login_screen(f, chunks[1], app);
+            render_login_screen(f, main_chunk, app);
         }
         InputMode::SongList => {
             match &app.loading_state {
                 LoadingState::NotLoading => {
-                    render_main_content(f, chunks[1], app);
+                    render_main_content(f, main_chunk, app);
                 }
                 LoadingState::LoadingSongs { progress, total } => {
-                    render_loading_screen(f, chunks[1], *progress, *total);
+                    render_loading_screen(f, main_chunk, *progress, *total);
                 }
             }
         }
     }
-
-    // Enhanced status bar
-    render_status_bar(f, chunks[2], app);
+    render_status_bar(f, status_chunk, app);
 }
 
 fn render_login_screen(f: &mut Frame, area: Rect, app: &App) {
@@ -1193,20 +1274,37 @@ fn render_queue(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
-    // Create a single line status bar
+    // Add border around the entire status bar first
+    let status_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Status")
+        .title_style(Style::default().fg(Color::Cyan));
+    f.render_widget(status_block, area);
+
+    // Create horizontal layout for better spacing inside the bordered area
+    let inner_area = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(50), // Song info (left side)
+            Constraint::Percentage(25), // Time info (center-left)
+            Constraint::Percentage(25), // Volume info (right side)
+        ].as_ref())
+        .split(inner_area);
+
     let song_info = if let Some(ref song) = app.current_song {
         let artist = song.album_artist.as_deref().unwrap_or("Unknown Artist");
         format!("{} - {}", song.name, artist)
     } else {
         "No song playing".to_string()
     };
-
+    
     let play_pause_text = if app.current_song.is_some() {
         if app.is_paused { "⏸️" } else { "▶️" }
     } else {
         "⏹️"
     };
-
+    
     let time_text = if let Some(ref _song) = app.current_song {
         let current_time_str = app.format_time(app.current_time);
         let total_duration = app.get_current_song_duration()
@@ -1216,18 +1314,28 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     } else {
         "00:00 / 00:00".to_string()
     };
-
+    
     let volume_percent = (app.volume * 100.0) as u32;
     let volume_text = format!("🔊 {}%", volume_percent);
 
-    let status_text = format!("{} {}     |     {}     |     {}", 
-        play_pause_text, song_info, time_text, volume_text);
-
-    let status_widget = Paragraph::new(status_text)
+    // Left side: Play/pause button and song info
+    let left_text = format!("{} {}", play_pause_text, song_info);
+    let left_widget = Paragraph::new(left_text)
         .style(Style::default().fg(Color::White))
-        .block(Block::default().borders(Borders::ALL));
+        .alignment(Alignment::Left);
+    f.render_widget(left_widget, chunks[0]);
 
-    f.render_widget(status_widget, area);
+    // Center: Time info
+    let time_widget = Paragraph::new(time_text)
+        .style(Style::default().fg(Color::Yellow))
+        .alignment(Alignment::Center);
+    f.render_widget(time_widget, chunks[1]);
+
+    // Right side: Volume info
+    let volume_widget = Paragraph::new(volume_text)
+        .style(Style::default().fg(Color::Green))
+        .alignment(Alignment::Right);
+    f.render_widget(volume_widget, chunks[2]);
 }
 
 #[tokio::main]
@@ -1268,127 +1376,158 @@ async fn main() -> Result<()> {
     loop {
         terminal.draw(|f| ui(f, &app))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Tab => {
-                        if app.input_mode == InputMode::SongList {
-                            app.switch_panel();
-                        }
-                    }
-                    KeyCode::Char('q') => {
-                        if app.input_mode == InputMode::SongList {
-                            app.toggle_queue_item();
-                        }
-                    }
-                    KeyCode::PageUp => {
-                        if app.input_mode == InputMode::SongList {
-                            app.adjust_volume(0.1);
-                        }
-                    }
-                    KeyCode::PageDown => {
-                        if app.input_mode == InputMode::SongList {
-                            app.adjust_volume(-0.1);
-                        }
-                    }
-                    KeyCode::Esc => {
-                        if app.input_mode == InputMode::SongList {
-                            break;
-                        } else {
-                            app.input_mode = InputMode::ServerUrl;
-                            app.server_url_input.clear();
-                            app.username_input.clear();
-                            app.password_input.clear();
-                            app.error_message = None;
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        if app.input_mode == InputMode::SongList {
-                            match c {
-                                ' ' => {
-                                    app.pause_unpause();
-                                }
-                                '+' | '=' => {
-                                    app.adjust_volume(0.1);
-                                }
-                                '-' => {
-                                    app.adjust_volume(-0.1);
-                                }
-                                _ => {}
+        // Update current time for the status bar
+        if app.input_mode == InputMode::SongList {
+            app.update_current_time();
+        }
+
+        // Check for autoplay - if current song finished and we have songs in queue
+        if app.input_mode == InputMode::SongList && app.is_song_finished() && !app.queue.is_empty() {
+            if let Err(e) = app.play_next_in_queue().await {
+                app.error_message = Some(format!("Autoplay failed: {}", e));
+            }
+            // Small delay to prevent rapid autoplay checks
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+
+        // Use non-blocking event reading with timeout
+        if crossterm::event::poll(std::time::Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Tab => {
+                            if app.input_mode == InputMode::SongList {
+                                app.switch_panel();
                             }
-                        } else {
-                            app.handle_input(c);
                         }
-                    }
-                    KeyCode::Backspace => {
-                        if app.input_mode != InputMode::SongList {
-                            app.handle_backspace();
+                        KeyCode::Char('q') => {
+                            if app.input_mode == InputMode::SongList {
+                                app.toggle_queue_item();
+                            }
                         }
-                    }
-                    KeyCode::Enter => {
-                        match app.input_mode {
-                            InputMode::ServerUrl => {
-                                app.next_input_mode();
+                        KeyCode::PageUp => {
+                            if app.input_mode == InputMode::SongList {
+                                app.adjust_volume(0.1);
                             }
-                            InputMode::Username => {
-                                app.next_input_mode();
+                        }
+                        KeyCode::PageDown => {
+                            if app.input_mode == InputMode::SongList {
+                                app.adjust_volume(-0.1);
                             }
-                            InputMode::Password => {
-                                // Try to authenticate
+                        }
+                        KeyCode::Esc => {
+                            if app.input_mode == InputMode::SongList {
+                                break;
+                            } else {
+                                app.input_mode = InputMode::ServerUrl;
+                                app.server_url_input.clear();
+                                app.username_input.clear();
+                                app.password_input.clear();
                                 app.error_message = None;
-                                if let Err(e) = app.authenticate().await {
-                                    app.error_message = Some(format!("Authentication failed: {}", e));
-                                } else {
-                                    app.input_mode = InputMode::SongList;
-                                    if let Err(e) = app.load_songs().await {
-                                        app.error_message = Some(format!("Failed to load songs: {}", e));
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            if app.input_mode == InputMode::SongList {
+                                match c {
+                                    ' ' => {
+                                        app.pause_unpause();
+                                    }
+                                    '+' | '=' => {
+                                        app.adjust_volume(0.1);
+                                    }
+                                    '-' => {
+                                        app.adjust_volume(-0.1);
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                app.handle_input(c);
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            if app.input_mode != InputMode::SongList {
+                                app.handle_backspace();
+                            }
+                        }
+                        KeyCode::Enter => {
+                            match app.input_mode {
+                                InputMode::ServerUrl => {
+                                    app.next_input_mode();
+                                }
+                                InputMode::Username => {
+                                    app.next_input_mode();
+                                }
+                                InputMode::Password => {
+                                    // Try to authenticate
+                                    app.error_message = None;
+                                    if let Err(e) = app.authenticate().await {
+                                        app.error_message = Some(format!("Authentication failed: {}", e));
+                                    } else {
+                                        app.input_mode = InputMode::SongList;
+                                        if let Err(e) = app.load_songs().await {
+                                            app.error_message = Some(format!("Failed to load songs: {}", e));
+                                        }
                                     }
                                 }
-                            }
-                            InputMode::SongList => {
-                                if let Some(selected) = app.list_state.selected() {
-                                    if let Some(node) = app.flat_library.get(selected) {
-                                        match &node.item {
-                                            LibraryItem::Song(song) => {
-                                                let _song_name = song.name.clone();
-                                                let song_clone = song.clone();
-                                                app.stop_current_song();
-                                                app.add_to_queue(song_clone.clone());
-                                                if let Err(e) = app.play_song(&song_clone).await {
-                                                    app.error_message = Some(format!("Failed to play song: {}", e));
+                                InputMode::SongList => {
+                                    match app.active_panel {
+                                        ActivePanel::Library => {
+                                            if let Some(selected) = app.list_state.selected() {
+                                                if let Some(node) = app.flat_library.get(selected) {
+                                                    match &node.item {
+                                                        LibraryItem::Song(song) => {
+                                                            let _song_name = song.name.clone();
+                                                            let song_clone = song.clone();
+                                                            app.stop_current_song();
+                                                            app.add_to_queue(song_clone.clone());
+                                                            if let Err(e) = app.play_song(&song_clone).await {
+                                                                app.error_message = Some(format!("Failed to play song: {}", e));
+                                                            }
+                                                        }
+                                                        LibraryItem::Artist(_) | LibraryItem::Album(_, _) => {
+                                                            app.navigate_right();
+                                                        }
+                                                    }
                                                 }
                                             }
-                                            LibraryItem::Artist(_) | LibraryItem::Album(_, _) => {
-                                                // Expand/collapse the node
-                                                app.navigate_right();
+                                        }
+                                        ActivePanel::Queue => {
+                                            if let Some(queue_selected) = app.queue_state.selected() {
+                                                if let Some(song) = app.queue.get(queue_selected) {
+                                                    let song_clone = song.clone();
+                                                    app.stop_current_song();
+                                                    if let Err(e) = app.play_song(&song_clone).await {
+                                                        app.error_message = Some(format!("Failed to play queue song: {}", e));
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                    KeyCode::Up => {
-                        if app.input_mode == InputMode::SongList {
-                            app.navigate_up();
+                        KeyCode::Up => {
+                            if app.input_mode == InputMode::SongList {
+                                app.navigate_up();
+                            }
                         }
-                    }
-                    KeyCode::Down => {
-                        if app.input_mode == InputMode::SongList {
-                            app.navigate_down();
+                        KeyCode::Down => {
+                            if app.input_mode == InputMode::SongList {
+                                app.navigate_down();
+                            }
                         }
-                    }
-                    KeyCode::Left => {
-                        if app.input_mode == InputMode::SongList {
-                            app.navigate_left();
+                        KeyCode::Left => {
+                            if app.input_mode == InputMode::SongList {
+                                app.navigate_left();
+                            }
                         }
-                    }
-                    KeyCode::Right => {
-                        if app.input_mode == InputMode::SongList {
-                            app.navigate_right();
+                        KeyCode::Right => {
+                            if app.input_mode == InputMode::SongList {
+                                app.navigate_right();
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
