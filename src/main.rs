@@ -1834,14 +1834,8 @@ async fn main() -> Result<()> {
                                     's' | 'S' => {
                                         app.shuffle_queue();
                                     }
-                                    '/' => {
-                                        app.last_key = Some('/');
-                                    }
-                                    '?' => {
-                                        if app.last_key == Some('/') {
-                                            app.toggle_help();
-                                        }
-                                        app.last_key = None;
+                                    '?' | '/' | 'h' | 'H' => {
+                                        app.toggle_help();
                                     }
                                     _ => {
                                         app.last_key = None;
