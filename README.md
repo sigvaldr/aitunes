@@ -39,16 +39,9 @@ Simply download and run the correct binary for your operating system
 ### Navigation
 Press `?` or `/` for this information within the application
 
-↑/↓     Navigate up/down
-←/→     Expand/collapse folders
-Tab     Switch between Library and Queue
-Enter   Play selected song/queue item
-Space   Pause/Resume
-+/-     Change volume
-PgUp/Dn Change volume
-Q       Add/Remove selection from queue
-S       Shuffle queue
-C       Clear queue
+↑/↓ = Navigate up/down, ←/→ = Expand/collapse folders, Tab = Switch between Library and Queue
+Enter = Play selected song/queue item, Space = Pause/Resume, +/- or PgUp/Dn = Change volume
+Q = Add/Remove selection from queue, S = Shuffle queue, C = Clear queue
 Esc     Exit application
 
 ### Credential Storage
