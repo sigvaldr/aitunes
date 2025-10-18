@@ -28,7 +28,6 @@ struct Theme {
     accent: Color,     // Complementary color for highlights
     muted: Color,      // Muted version for secondary text
     error: Color,      // Error color
-    success: Color,    // Success color
 }
 
 impl Theme {
@@ -40,7 +39,6 @@ impl Theme {
             accent: Color::Rgb(0, 120, 170),    // Even darker for contrast
             muted: Color::Rgb(150, 150, 150),   // Light gray for secondary text on dark background
             error: Color::Rgb(255, 100, 100),   // Brighter red for errors on dark background
-            success: Color::Rgb(100, 200, 100), // Brighter green for success on dark background
         }
     }
 
@@ -62,10 +60,6 @@ impl Theme {
 
     fn error_style(&self) -> Style {
         Style::default().fg(self.error).bg(self.background)
-    }
-
-    fn success_style(&self) -> Style {
-        Style::default().fg(self.success).bg(self.background)
     }
 
     fn title_style(&self) -> Style {
@@ -91,7 +85,6 @@ const THEME: Theme = Theme {
     accent: Color::Rgb(0, 120, 170),
     muted: Color::Rgb(150, 150, 150),
     error: Color::Rgb(255, 100, 100),
-    success: Color::Rgb(100, 200, 100),
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,7 +241,7 @@ impl App {
             queue: Vec::new(),
             queue_state: ListState::default(),
             current_time: 0,
-            volume: 0.8, // Default to 80% volume
+            volume: 0.7, // Default to 70% volume
             active_panel: ActivePanel::Library,
             song_start_time: None,
             show_help: false,
@@ -1681,7 +1674,8 @@ fn render_help_menu(f: &mut Frame, area: Rect) {
         Line::from("  PgUp/Dn Change volume"),
         Line::from("  Q       Add/Remove selection from queue"),
         Line::from("  S       Shuffle queue"),
-        Line::from("  H/?      Show/Hide this help menu"),
+        Line::from("  C       Clear queue"),
+        Line::from("  H/?     Show/Hide this help menu"),
         Line::from("  Esc     Exit application"),
     ];
 
@@ -1812,6 +1806,9 @@ async fn main() -> Result<()> {
                                     }
                                     's' | 'S' => {
                                         app.shuffle_queue();
+                                    }
+                                    'c' | 'C' => {
+                                        app.clear_queue();
                                     }
                                     '?' | '/' | 'h' | 'H' => {
                                         app.toggle_help();
