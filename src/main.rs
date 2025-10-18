@@ -22,58 +22,64 @@ use std::{
 
 // Theme system
 struct Theme {
-    primary: Color,      // #00A6D7 - Main foreground color
-    background: Color,   // #343434 - Background color
-    secondary: Color,    // Lighter variant of primary
-    accent: Color,       // Complementary color for highlights
-    muted: Color,        // Muted version for secondary text
-    error: Color,        // Error color
-    success: Color,      // Success color
+    primary: Color,    // #00A6D7 - Main foreground color
+    background: Color, // #343434 - Background color
+    secondary: Color,  // Lighter variant of primary
+    accent: Color,     // Complementary color for highlights
+    muted: Color,      // Muted version for secondary text
+    error: Color,      // Error color
+    success: Color,    // Success color
 }
 
 impl Theme {
     fn new() -> Self {
         Self {
-            primary: Color::Rgb(0, 166, 215),     // #00A6D7
-            background: Color::Rgb(52, 52, 52),    // #343434
-            secondary: Color::Rgb(0, 140, 190),    // Darker variant
-            accent: Color::Rgb(0, 120, 170),       // Even darker for contrast
-            muted: Color::Rgb(150, 150, 150),      // Light gray for secondary text on dark background
-            error: Color::Rgb(255, 100, 100),      // Brighter red for errors on dark background
-            success: Color::Rgb(100, 200, 100),    // Brighter green for success on dark background
+            primary: Color::Rgb(0, 166, 215),   // #00A6D7
+            background: Color::Rgb(52, 52, 52), // #343434
+            secondary: Color::Rgb(0, 140, 190), // Darker variant
+            accent: Color::Rgb(0, 120, 170),    // Even darker for contrast
+            muted: Color::Rgb(150, 150, 150),   // Light gray for secondary text on dark background
+            error: Color::Rgb(255, 100, 100),   // Brighter red for errors on dark background
+            success: Color::Rgb(100, 200, 100), // Brighter green for success on dark background
         }
     }
-    
+
     fn primary_style(&self) -> Style {
         Style::default().fg(self.primary).bg(self.background)
     }
-    
+
     fn secondary_style(&self) -> Style {
         Style::default().fg(self.secondary).bg(self.background)
     }
-    
+
     fn accent_style(&self) -> Style {
         Style::default().fg(self.accent).bg(self.background)
     }
-    
+
     fn muted_style(&self) -> Style {
         Style::default().fg(self.muted).bg(self.background)
     }
-    
+
     fn error_style(&self) -> Style {
         Style::default().fg(self.error).bg(self.background)
     }
-    
+
     fn success_style(&self) -> Style {
         Style::default().fg(self.success).bg(self.background)
     }
-    
+
     fn title_style(&self) -> Style {
-        Style::default().fg(self.primary).bg(self.background).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(self.primary)
+            .bg(self.background)
+            .add_modifier(Modifier::BOLD)
     }
-    
+
     fn highlight_style(&self) -> Style {
-        Style::default().fg(Color::Rgb(0, 0, 0)).bg(Color::Rgb(255, 255, 255)).add_modifier(Modifier::REVERSED)
+        Style::default()
+            .fg(Color::Rgb(0, 0, 0))
+            .bg(Color::Rgb(255, 255, 255))
+            .add_modifier(Modifier::REVERSED)
     }
 }
 
@@ -139,19 +145,19 @@ impl LibraryNode {
             expanded: false,
         }
     }
-    
+
     fn add_child(&mut self, child: LibraryNode) {
         self.children.push(child);
     }
-    
+
     fn is_expanded(&self) -> bool {
         self.expanded
     }
-    
+
     fn toggle_expansion(&mut self) {
         self.expanded = !self.expanded;
     }
-    
+
     fn get_display_name(&self) -> String {
         match &self.item {
             LibraryItem::Artist(name) => name.clone(),
@@ -159,7 +165,7 @@ impl LibraryNode {
             LibraryItem::Song(song) => song.name.clone(),
         }
     }
-    
+
     fn get_indent_level(&self) -> usize {
         match &self.item {
             LibraryItem::Artist(_) => 0,
@@ -194,11 +200,11 @@ struct App {
     queue: Vec<JellyfinItem>,
     queue_state: ListState,
     current_time: u64, // Current playback time in milliseconds
-    volume: f32, // Volume level 0.0 to 1.0
+    volume: f32,       // Volume level 0.0 to 1.0
     active_panel: ActivePanel,
     song_start_time: Option<std::time::Instant>, // When the current song started playing
-    show_help: bool, // Whether to show the help menu
-    last_key: Option<char>, // Track last key for /? combination
+    show_help: bool,                             // Whether to show the help menu
+    last_key: Option<char>,                      // Track last key for /? combination
 }
 
 #[derive(Debug, Clone)]
@@ -255,7 +261,7 @@ impl App {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| anyhow!("Could not find config directory"))?
             .join("aitunes");
-        
+
         if !config_dir.exists() {
             fs::create_dir_all(&config_dir)?;
         }
@@ -274,7 +280,7 @@ impl App {
             let config_dir = dirs::config_dir()
                 .ok_or_else(|| anyhow!("Could not find config directory"))?
                 .join("aitunes");
-            
+
             fs::create_dir_all(&config_dir)?;
             let creds_file = config_dir.join("credentials.json");
             fs::write(&creds_file, serde_json::to_string_pretty(creds)?)?;
@@ -285,15 +291,22 @@ impl App {
     async fn authenticate(&mut self) -> Result<()> {
         let client = Client::new();
         let server_url = self.server_url_input.trim();
-        
+
         // First, get the public system info to verify server connection
         let system_info_url = format!("{}/System/Info/Public", server_url);
-        
+
         let response = client.get(&system_info_url).send().await?;
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(anyhow!("Failed to connect to Jellyfin server. Status: {}, Error: {}", status, error_text));
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(anyhow!(
+                "Failed to connect to Jellyfin server. Status: {}, Error: {}",
+                status,
+                error_text
+            ));
         }
 
         // Authenticate using the correct Jellyfin API format
@@ -313,12 +326,19 @@ impl App {
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(anyhow!("Authentication failed. Status: {}, Error: {}", status, error_text));
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(anyhow!(
+                "Authentication failed. Status: {}, Error: {}",
+                status,
+                error_text
+            ));
         }
 
         let auth_response: serde_json::Value = response.json().await?;
-        
+
         let access_token = auth_response["AccessToken"]
             .as_str()
             .ok_or_else(|| anyhow!("No access token in response"))?;
@@ -343,12 +363,18 @@ impl App {
     }
 
     async fn load_songs(&mut self) -> Result<()> {
-        let auth = self.auth.as_ref().ok_or_else(|| anyhow!("Not authenticated"))?;
+        let auth = self
+            .auth
+            .as_ref()
+            .ok_or_else(|| anyhow!("Not authenticated"))?;
         let client = Client::new();
-        
+
         // Start loading state
-        self.loading_state = LoadingState::LoadingSongs { progress: 0, total: 0 };
-        
+        self.loading_state = LoadingState::LoadingSongs {
+            progress: 0,
+            total: 0,
+        };
+
         // First, get the total count
         let count_url = format!(
             "{}/Users/{}/Items?Recursive=true&IncludeItemTypes=Audio&SortBy=Name&Limit=1",
@@ -363,20 +389,26 @@ impl App {
             .await?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(anyhow!("Failed to load songs: {}", error_text));
         }
 
         let count_response: serde_json::Value = response.json().await?;
         let total_count = count_response["TotalRecordCount"].as_u64().unwrap_or(0) as usize;
-        
-        self.loading_state = LoadingState::LoadingSongs { progress: 0, total: total_count };
-        
+
+        self.loading_state = LoadingState::LoadingSongs {
+            progress: 0,
+            total: total_count,
+        };
+
         // Load all songs in batches
         let mut all_songs = Vec::new();
         let mut start_index = 0;
         let batch_size = 100;
-        
+
         while start_index < total_count {
             let songs_url = format!(
                 "{}/Users/{}/Items?Recursive=true&IncludeItemTypes=Audio&SortBy=Name&StartIndex={}&Limit={}",
@@ -393,35 +425,39 @@ impl App {
                 .await?;
 
             if !response.status().is_success() {
-                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
                 return Err(anyhow!("Failed to load songs: {}", error_text));
             }
 
             let songs_response: serde_json::Value = response.json().await?;
-            
+
             if let Some(items) = songs_response["Items"].as_array() {
                 for item in items {
-                    if let Ok(jellyfin_item) = serde_json::from_value::<JellyfinItem>(item.clone()) {
+                    if let Ok(jellyfin_item) = serde_json::from_value::<JellyfinItem>(item.clone())
+                    {
                         all_songs.push(jellyfin_item);
                     }
                 }
             }
-            
+
             start_index += batch_size;
-            self.loading_state = LoadingState::LoadingSongs { 
-                progress: start_index.min(total_count), 
-                total: total_count 
+            self.loading_state = LoadingState::LoadingSongs {
+                progress: start_index.min(total_count),
+                total: total_count,
             };
         }
-        
+
         self.songs = all_songs;
-        
+
         // Organize songs into hierarchical structure
         self.organize_library();
-        
+
         // Stop loading state
         self.loading_state = LoadingState::NotLoading;
-        
+
         if !self.flat_library.is_empty() {
             self.list_state.select(Some(0));
         }
@@ -429,13 +465,22 @@ impl App {
         Ok(())
     }
 
-    async fn load_songs_with_progress(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-        let auth = self.auth.as_ref().ok_or_else(|| anyhow!("Not authenticated"))?;
+    async fn load_songs_with_progress(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    ) -> Result<()> {
+        let auth = self
+            .auth
+            .as_ref()
+            .ok_or_else(|| anyhow!("Not authenticated"))?;
         let client = Client::new();
-        
+
         // Start loading state
-        self.loading_state = LoadingState::LoadingSongs { progress: 0, total: 0 };
-        
+        self.loading_state = LoadingState::LoadingSongs {
+            progress: 0,
+            total: 0,
+        };
+
         // First, get the total count
         let count_url = format!(
             "{}/Users/{}/Items?Recursive=true&IncludeItemTypes=Audio&SortBy=Name&Limit=1",
@@ -450,27 +495,33 @@ impl App {
             .await?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(anyhow!("Failed to load songs: {}", error_text));
         }
 
         let count_response: serde_json::Value = response.json().await?;
         let total_count = count_response["TotalRecordCount"].as_u64().unwrap_or(0) as usize;
-        
-        self.loading_state = LoadingState::LoadingSongs { progress: 0, total: total_count };
-        
+
+        self.loading_state = LoadingState::LoadingSongs {
+            progress: 0,
+            total: total_count,
+        };
+
         // Load all songs in batches
         let mut all_songs = Vec::new();
         let mut start_index = 0;
         let batch_size = 100;
-        
+
         while start_index < total_count {
             // Update UI to show loading progress
             terminal.draw(|f| ui(f, self))?;
-            
+
             // Small delay to make loading visible
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            
+
             let songs_url = format!(
                 "{}/Users/{}/Items?Recursive=true&IncludeItemTypes=Audio&SortBy=Name&StartIndex={}&Limit={}",
                 self.credentials.as_ref().unwrap().server_url,
@@ -486,35 +537,39 @@ impl App {
                 .await?;
 
             if !response.status().is_success() {
-                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
                 return Err(anyhow!("Failed to load songs: {}", error_text));
             }
 
             let songs_response: serde_json::Value = response.json().await?;
-            
+
             if let Some(items) = songs_response["Items"].as_array() {
                 for item in items {
-                    if let Ok(jellyfin_item) = serde_json::from_value::<JellyfinItem>(item.clone()) {
+                    if let Ok(jellyfin_item) = serde_json::from_value::<JellyfinItem>(item.clone())
+                    {
                         all_songs.push(jellyfin_item);
                     }
                 }
             }
-            
+
             start_index += batch_size;
-            self.loading_state = LoadingState::LoadingSongs { 
-                progress: start_index.min(total_count), 
-                total: total_count 
+            self.loading_state = LoadingState::LoadingSongs {
+                progress: start_index.min(total_count),
+                total: total_count,
             };
         }
-        
+
         self.songs = all_songs;
-        
+
         // Organize songs into hierarchical structure
         self.organize_library();
-        
+
         // Stop loading state
         self.loading_state = LoadingState::NotLoading;
-        
+
         if !self.flat_library.is_empty() {
             self.list_state.select(Some(0));
         }
@@ -524,65 +579,71 @@ impl App {
 
     fn organize_library(&mut self) {
         use std::collections::HashMap;
-        
+
         // Group songs by artist and album
         let mut artists: HashMap<String, HashMap<String, Vec<JellyfinItem>>> = HashMap::new();
-        
+
         for song in &self.songs {
-            let artist = song.album_artist.as_deref().unwrap_or("Unknown Artist").to_string();
+            let artist = song
+                .album_artist
+                .as_deref()
+                .unwrap_or("Unknown Artist")
+                .to_string();
             let album = song.album.as_deref().unwrap_or("Unknown Album").to_string();
-            
-            artists.entry(artist)
+
+            artists
+                .entry(artist)
                 .or_insert_with(HashMap::new)
                 .entry(album)
                 .or_insert_with(Vec::new)
                 .push(song.clone());
         }
-        
+
         // Build hierarchical structure
         self.library_tree.clear();
         self.flat_library.clear();
-        
+
         let mut artist_names: Vec<_> = artists.keys().collect();
         artist_names.sort();
-        
+
         for artist_name in artist_names {
             let mut artist_node = LibraryNode::new(LibraryItem::Artist(artist_name.clone()));
-            
+
             let mut album_names: Vec<_> = artists[artist_name].keys().collect();
             album_names.sort();
-            
+
             for album_name in album_names {
-                let mut album_node = LibraryNode::new(LibraryItem::Album(artist_name.clone(), album_name.clone()));
-                
+                let mut album_node =
+                    LibraryNode::new(LibraryItem::Album(artist_name.clone(), album_name.clone()));
+
                 let mut songs = artists[artist_name][album_name].clone();
                 songs.sort_by(|a, b| a.name.cmp(&b.name));
-                
+
                 for song in songs {
                     let song_node = LibraryNode::new(LibraryItem::Song(song));
                     album_node.add_child(song_node);
                 }
-                
+
                 artist_node.add_child(album_node);
             }
-            
+
             self.library_tree.push(artist_node);
         }
-        
+
         // Create flattened view for navigation
         self.flatten_library();
     }
-    
+
     fn flatten_library(&mut self) {
         self.flat_library.clear();
-        
+
         for artist_node in &self.library_tree {
             self.flat_library.push(artist_node.clone());
-            
+
             if artist_node.is_expanded() {
                 for album_node in &artist_node.children {
                     self.flat_library.push(album_node.clone());
-                    
+
                     if album_node.is_expanded() {
                         for song_node in &album_node.children {
                             self.flat_library.push(song_node.clone());
@@ -594,27 +655,41 @@ impl App {
     }
 
     async fn play_song(&mut self, song: &JellyfinItem) -> Result<()> {
-        let auth = self.auth.as_ref().ok_or_else(|| anyhow!("Not authenticated"))?;
+        let auth = self
+            .auth
+            .as_ref()
+            .ok_or_else(|| anyhow!("Not authenticated"))?;
         let client = Client::new();
-        
+
         // Try different URL formats for better compatibility
         let urls_to_try = vec![
-            format!("{}/Items/{}/Download", self.credentials.as_ref().unwrap().server_url, song.id),
-            format!("{}/Audio/{}/stream", self.credentials.as_ref().unwrap().server_url, song.id),
-            format!("{}/Audio/{}/stream?api_key={}", self.credentials.as_ref().unwrap().server_url, song.id, auth.access_token),
+            format!(
+                "{}/Items/{}/Download",
+                self.credentials.as_ref().unwrap().server_url,
+                song.id
+            ),
+            format!(
+                "{}/Audio/{}/stream",
+                self.credentials.as_ref().unwrap().server_url,
+                song.id
+            ),
+            format!(
+                "{}/Audio/{}/stream?api_key={}",
+                self.credentials.as_ref().unwrap().server_url,
+                song.id,
+                auth.access_token
+            ),
         ];
 
         let mut audio_data = None;
 
         for url in urls_to_try {
-            
             let response = client
                 .get(&url)
                 .header("X-Emby-Authorization", format!("MediaBrowser Client=\"aitunes\", Device=\"Terminal\", DeviceId=\"aitunes-terminal\", Token=\"{}\", Version=\"1.0.0\"", auth.access_token))
                 .send()
                 .await?;
-            
-            
+
             if response.status().is_success() {
                 match response.bytes().await {
                     Ok(data) => {
@@ -626,44 +701,44 @@ impl App {
                     }
                 }
             } else {
-                let _error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                let _error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
             }
         }
 
         let audio_data = audio_data.ok_or_else(|| anyhow!("All URL formats failed"))?;
-        
+
         // Create audio sink
         let (_stream, stream_handle) = OutputStream::try_default()?;
         let sink = Sink::try_new(&stream_handle)?;
-        
+
         // Try to decode the audio with better error handling
         let cursor = Cursor::new(audio_data.to_vec());
         let source = match Decoder::new(BufReader::new(cursor)) {
             Ok(source) => source,
             Err(e) => {
-                
                 // Try alternative approach: check if it's a streaming format issue
                 // Sometimes Jellyfin returns partial data or the wrong content type
                 if audio_data.len() == 0 {
                     return Err(anyhow!("No audio data received"));
                 }
-                
+
                 // Try to create a new cursor and attempt decoding again
                 let cursor2 = Cursor::new(audio_data.to_vec());
                 match Decoder::new(BufReader::new(cursor2)) {
-                    Ok(source) => {
-                        source
-                    }
+                    Ok(source) => source,
                     Err(e2) => {
                         return Err(anyhow!("Unrecognized format: {} (original: {})", e2, e));
                     }
                 }
             }
         };
-        
+
         sink.append(source);
         sink.set_volume(self.volume);
-        
+
         self.sink = Some(sink);
         self._stream = Some(_stream);
         self.current_song = Some(song.clone());
@@ -683,7 +758,7 @@ impl App {
         self.song_start_time = None;
         self.current_time = 0;
     }
-    
+
     fn pause_unpause(&mut self) {
         if let Some(ref sink) = self.sink {
             if self.is_paused {
@@ -699,7 +774,7 @@ impl App {
             }
         }
     }
-    
+
     fn update_current_time(&mut self) {
         if let Some(start_time) = self.song_start_time {
             if !self.is_paused {
@@ -708,14 +783,14 @@ impl App {
             }
         }
     }
-    
+
     fn add_to_queue(&mut self, song: JellyfinItem) {
         self.queue.push(song);
         if self.queue_state.selected().is_none() && !self.queue.is_empty() {
             self.queue_state.select(Some(0));
         }
     }
-    
+
     fn remove_from_queue(&mut self, index: usize) {
         if index < self.queue.len() {
             self.queue.remove(index);
@@ -728,40 +803,43 @@ impl App {
             }
         }
     }
-    
+
     fn clear_queue(&mut self) {
         self.queue.clear();
         self.queue_state.select(None);
     }
-    
+
     fn shuffle_queue(&mut self) {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         if self.queue.len() <= 1 {
             return;
         }
-        
+
         // Use current time as seed for randomness
-        let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
         let mut hasher = DefaultHasher::new();
         seed.hash(&mut hasher);
         let mut rng = hasher.finish();
-        
+
         // Fisher-Yates shuffle
         for i in (1..self.queue.len()).rev() {
             rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
             let j = (rng as usize) % (i + 1);
             self.queue.swap(i, j);
         }
-        
+
         // Reset selection to first item
         if !self.queue.is_empty() {
             self.queue_state.select(Some(0));
         }
     }
-    
+
     fn add_album_or_artist_to_queue(&mut self) {
         if let Some(selected) = self.list_state.selected() {
             if let Some(node) = self.flat_library.get(selected) {
@@ -781,7 +859,7 @@ impl App {
             }
         }
     }
-    
+
     fn add_all_songs_from_artist(&mut self, artist_index: usize) {
         if let Some(artist_node) = self.flat_library.get(artist_index) {
             if let LibraryItem::Artist(artist_name) = &artist_node.item {
@@ -796,7 +874,7 @@ impl App {
                         }
                     }
                 }
-                
+
                 // Update queue selection
                 if self.queue_state.selected().is_none() && !self.queue.is_empty() {
                     self.queue_state.select(Some(0));
@@ -804,7 +882,7 @@ impl App {
             }
         }
     }
-    
+
     fn add_all_songs_from_album(&mut self, album_index: usize) {
         if let Some(album_node) = self.flat_library.get(album_index) {
             if let LibraryItem::Album(artist_name, album_name) = &album_node.item {
@@ -821,7 +899,7 @@ impl App {
                         }
                     }
                 }
-                
+
                 // Update queue selection
                 if self.queue_state.selected().is_none() && !self.queue.is_empty() {
                     self.queue_state.select(Some(0));
@@ -829,35 +907,36 @@ impl App {
             }
         }
     }
-    
+
     fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
     }
-    
+
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
         if let Some(ref sink) = self.sink {
             sink.set_volume(self.volume);
         }
     }
-    
+
     fn adjust_volume(&mut self, delta: f32) {
         self.set_volume(self.volume + delta);
     }
-    
+
     fn format_time(&self, milliseconds: u64) -> String {
         let total_seconds = milliseconds / 1000;
         let minutes = total_seconds / 60;
         let seconds = total_seconds % 60;
         format!("{:02}:{:02}", minutes, seconds)
     }
-    
+
     fn get_current_song_duration(&self) -> Option<u64> {
-        self.current_song.as_ref()
+        self.current_song
+            .as_ref()
             .and_then(|song| song.run_time_ticks)
             .map(|ticks| ticks / 10_000) // Convert ticks to milliseconds
     }
-    
+
     fn is_song_finished(&self) -> bool {
         if let Some(ref sink) = self.sink {
             sink.empty() // Returns true if the sink has no more audio to play
@@ -865,22 +944,26 @@ impl App {
             false
         }
     }
-    
+
     async fn play_next_in_queue(&mut self) -> Result<()> {
         if !self.queue.is_empty() {
             // Find the current song in the queue and remove it
             if let Some(ref current_song) = self.current_song {
-                if let Some(current_index) = self.queue.iter().position(|song| song.id == current_song.id) {
+                if let Some(current_index) = self
+                    .queue
+                    .iter()
+                    .position(|song| song.id == current_song.id)
+                {
                     // Remove the finished song from the queue
                     self.queue.remove(current_index);
-                    
+
                     // Adjust queue selection
                     if self.queue.is_empty() {
                         self.queue_state.select(None);
                         self.stop_current_song();
                         return Ok(());
                     }
-                    
+
                     // Play the next song (which is now at the same index)
                     if current_index < self.queue.len() {
                         let next_song = self.queue[current_index].clone();
@@ -899,7 +982,7 @@ impl App {
                     }
                 }
             }
-            
+
             // If current song not found in queue, play first in queue
             let first_song = self.queue[0].clone();
             self.stop_current_song();
@@ -908,14 +991,14 @@ impl App {
         }
         Ok(())
     }
-    
+
     fn switch_panel(&mut self) {
         self.active_panel = match self.active_panel {
             ActivePanel::Library => ActivePanel::Queue,
             ActivePanel::Queue => ActivePanel::Library,
         };
     }
-    
+
     fn toggle_queue_item(&mut self) {
         match self.active_panel {
             ActivePanel::Library => {
@@ -923,7 +1006,9 @@ impl App {
                     if let Some(node) = self.flat_library.get(selected) {
                         if let LibraryItem::Song(song) = &node.item {
                             // Check if song is already in queue
-                            if let Some(queue_index) = self.queue.iter().position(|q| q.id == song.id) {
+                            if let Some(queue_index) =
+                                self.queue.iter().position(|q| q.id == song.id)
+                            {
                                 self.remove_from_queue(queue_index);
                             } else {
                                 self.add_to_queue(song.clone());
@@ -939,7 +1024,7 @@ impl App {
             }
         }
     }
-    
+
     fn navigate_queue_up(&mut self) {
         if !self.queue.is_empty() {
             let i = match self.queue_state.selected() {
@@ -955,7 +1040,7 @@ impl App {
             self.queue_state.select(Some(i));
         }
     }
-    
+
     fn navigate_queue_down(&mut self) {
         if !self.queue.is_empty() {
             let i = match self.queue_state.selected() {
@@ -1033,7 +1118,7 @@ impl App {
             }
         }
     }
-    
+
     fn navigate_down(&mut self) {
         match self.active_panel {
             ActivePanel::Library => {
@@ -1056,7 +1141,7 @@ impl App {
             }
         }
     }
-    
+
     fn navigate_right(&mut self) {
         match self.active_panel {
             ActivePanel::Library => {
@@ -1067,7 +1152,7 @@ impl App {
                                 // Find the corresponding node in the tree and expand it
                                 self.expand_node_in_tree(selected);
                                 self.flatten_library();
-                                
+
                                 // Adjust selection if needed
                                 if selected >= self.flat_library.len() {
                                     self.list_state.select(Some(self.flat_library.len() - 1));
@@ -1085,7 +1170,7 @@ impl App {
             }
         }
     }
-    
+
     fn navigate_left(&mut self) {
         match self.active_panel {
             ActivePanel::Library => {
@@ -1096,7 +1181,7 @@ impl App {
                                 // Find the corresponding node in the tree and collapse it
                                 self.collapse_node_in_tree(selected);
                                 self.flatten_library();
-                                
+
                                 // Adjust selection if needed
                                 if selected >= self.flat_library.len() {
                                     self.list_state.select(Some(self.flat_library.len() - 1));
@@ -1114,7 +1199,7 @@ impl App {
             }
         }
     }
-    
+
     fn expand_node_in_tree(&mut self, flat_index: usize) {
         if let Some(node) = self.flat_library.get(flat_index) {
             match &node.item {
@@ -1153,7 +1238,7 @@ impl App {
             }
         }
     }
-    
+
     fn collapse_node_in_tree(&mut self, flat_index: usize) {
         if let Some(node) = self.flat_library.get(flat_index) {
             match &node.item {
@@ -1202,33 +1287,56 @@ impl App {
 
 fn ui(f: &mut Frame, app: &App) {
     let (main_chunk, status_chunk) = {
-        let (main_chunks, has_title) = if matches!(app.input_mode, InputMode::ServerUrl | InputMode::Username | InputMode::Password) || matches!(app.loading_state, LoadingState::LoadingSongs { .. }) {
-            (Layout::default()
-                .direction(Direction::Vertical)
-                .margin(1)
-                .constraints([
-                    Constraint::Length(3), // Title
-                    Constraint::Min(0),   // Main
-                    Constraint::Length(3),// Status
-                ].as_ref())
-                .split(f.size()),
-            true)
-        } else {
-            (Layout::default()
-                .direction(Direction::Vertical)
-                .margin(1)
-                .constraints([
-                    Constraint::Min(0),   // Main
-                    Constraint::Length(3),// Status
-                ].as_ref())
-                .split(f.size()),
-            false)
-        };
+        let (main_chunks, has_title) =
+            if matches!(
+                app.input_mode,
+                InputMode::ServerUrl | InputMode::Username | InputMode::Password
+            ) || matches!(app.loading_state, LoadingState::LoadingSongs { .. })
+            {
+                (
+                    Layout::default()
+                        .direction(Direction::Vertical)
+                        .margin(1)
+                        .constraints(
+                            [
+                                Constraint::Length(3), // Title
+                                Constraint::Min(0),    // Main
+                                Constraint::Length(3), // Status
+                            ]
+                            .as_ref(),
+                        )
+                        .split(f.size()),
+                    true,
+                )
+            } else {
+                (
+                    Layout::default()
+                        .direction(Direction::Vertical)
+                        .margin(1)
+                        .constraints(
+                            [
+                                Constraint::Min(0),    // Main
+                                Constraint::Length(3), // Status
+                            ]
+                            .as_ref(),
+                        )
+                        .split(f.size()),
+                    false,
+                )
+            };
         if has_title {
-            let title = Paragraph::new("🎵 aiTunes - Jellyfin Music Player")
-                .style(THEME.title_style())
-                .alignment(Alignment::Center)
-                .block(Block::default().borders(Borders::ALL).style(THEME.primary_style()));
+            let title = Paragraph::new(format!(
+                "aiTunes v{} - By Sigvaldr",
+                env!("CARGO_PKG_VERSION")
+            ))
+            .style(THEME.title_style())
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .style(THEME.primary_style()),
+            );
+
             f.render_widget(title, main_chunks[0]);
             (main_chunks[1], main_chunks[2])
         } else {
@@ -1240,19 +1348,17 @@ fn ui(f: &mut Frame, app: &App) {
         InputMode::ServerUrl | InputMode::Username | InputMode::Password => {
             render_login_screen(f, main_chunk, app);
         }
-        InputMode::SongList => {
-            match &app.loading_state {
-                LoadingState::NotLoading => {
-                    render_main_content(f, main_chunk, app);
-                }
-                LoadingState::LoadingSongs { progress, total } => {
-                    render_loading_screen(f, main_chunk, *progress, *total);
-                }
+        InputMode::SongList => match &app.loading_state {
+            LoadingState::NotLoading => {
+                render_main_content(f, main_chunk, app);
             }
-        }
+            LoadingState::LoadingSongs { progress, total } => {
+                render_loading_screen(f, main_chunk, *progress, *total);
+            }
+        },
     }
     render_status_bar(f, status_chunk, app);
-    
+
     // Show help menu if enabled
     if app.show_help {
         render_help_menu(f, f.size());
@@ -1262,7 +1368,14 @@ fn ui(f: &mut Frame, app: &App) {
 fn render_login_screen(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Length(3)].as_ref())
+        .constraints(
+            [
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Length(3),
+            ]
+            .as_ref(),
+        )
         .split(area);
 
     // Server URL input
@@ -1273,7 +1386,12 @@ fn render_login_screen(f: &mut Frame, area: Rect, app: &App) {
     };
     let server_url = Paragraph::new(format!("Server URL: {}", app.server_url_input))
         .style(server_url_style)
-        .block(Block::default().borders(Borders::ALL).title("Server URL").style(THEME.primary_style()));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Server URL")
+                .style(THEME.primary_style()),
+        );
     f.render_widget(server_url, chunks[0]);
 
     // Username input
@@ -1284,7 +1402,12 @@ fn render_login_screen(f: &mut Frame, area: Rect, app: &App) {
     };
     let username = Paragraph::new(format!("Username: {}", app.username_input))
         .style(username_style)
-        .block(Block::default().borders(Borders::ALL).title("Username").style(THEME.primary_style()));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Username")
+                .style(THEME.primary_style()),
+        );
     f.render_widget(username, chunks[1]);
 
     // Password input
@@ -1296,7 +1419,12 @@ fn render_login_screen(f: &mut Frame, area: Rect, app: &App) {
     let password_display = "*".repeat(app.password_input.len());
     let password = Paragraph::new(format!("Password: {}", password_display))
         .style(password_style)
-        .block(Block::default().borders(Borders::ALL).title("Password").style(THEME.primary_style()));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Password")
+                .style(THEME.primary_style()),
+        );
     f.render_widget(password, chunks[2]);
 
     // Error message
@@ -1305,21 +1433,37 @@ fn render_login_screen(f: &mut Frame, area: Rect, app: &App) {
         let error_widget = Paragraph::new(error.as_str())
             .style(THEME.error_style())
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).title("Error").style(THEME.error_style()));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Error")
+                    .style(THEME.error_style()),
+            );
         f.render_widget(Clear, error_area);
         f.render_widget(error_widget, error_area);
     }
 }
 
 fn render_loading_screen(f: &mut Frame, area: Rect, progress: usize, total: usize) {
-    let percentage = if total > 0 { (progress * 100) / total } else { 0 };
-    let progress_text = format!("Loading songs... {} / {} ({}%)", progress, total, percentage);
-    
+    let percentage = if total > 0 {
+        (progress * 100) / total
+    } else {
+        0
+    };
+    let progress_text = format!(
+        "Loading songs... {} / {} ({}%)",
+        progress, total, percentage
+    );
+
     // Create a progress bar
-    let progress_width = if total > 0 { (area.width as usize * progress) / total } else { 0 };
+    let progress_width = if total > 0 {
+        (area.width as usize * progress) / total
+    } else {
+        0
+    };
     let progress_bar = "█".repeat(progress_width as usize);
     let remaining_bar = "░".repeat((area.width as usize).saturating_sub(progress_width as usize));
-    
+
     let loading_widget = Paragraph::new(vec![
         Line::from(progress_text),
         Line::from(""),
@@ -1329,8 +1473,13 @@ fn render_loading_screen(f: &mut Frame, area: Rect, progress: usize, total: usiz
     ])
     .style(THEME.primary_style())
     .alignment(Alignment::Center)
-    .block(Block::default().borders(Borders::ALL).title("Loading Music Library").style(THEME.primary_style()));
-    
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Loading Music Library")
+            .style(THEME.primary_style()),
+    );
+
     f.render_widget(loading_widget, area);
 }
 
@@ -1351,7 +1500,7 @@ fn render_song_list(f: &mut Frame, area: Rect, app: &App) {
         .map(|node| {
             let indent = "  ".repeat(node.get_indent_level());
             let display_name = node.get_display_name();
-            
+
             let (prefix, style) = match &node.item {
                 LibraryItem::Artist(_) => {
                     let symbol = if node.is_expanded() { "▼" } else { "▶" };
@@ -1370,29 +1519,20 @@ fn render_song_list(f: &mut Frame, area: Rect, app: &App) {
                     } else {
                         "Unknown".to_string()
                     };
-                    
+
                     let _artist = song.album_artist.as_deref().unwrap_or("Unknown Artist");
                     let album = song.album.as_deref().unwrap_or("Unknown Album");
-                    
+
                     return ListItem::new(Line::from(vec![
-                        Span::styled(
-                            format!("{}  {}", indent, song.name),
-                            THEME.primary_style(),
-                        ),
+                        Span::styled(format!("{}  {}", indent, song.name), THEME.primary_style()),
                         Span::raw(" "),
-                        Span::styled(
-                            format!("[{}]", album),
-                            THEME.muted_style(),
-                        ),
+                        Span::styled(format!("[{}]", album), THEME.muted_style()),
                         Span::raw(" "),
-                        Span::styled(
-                            format!("({})", duration),
-                            THEME.accent_style(),
-                        ),
+                        Span::styled(format!("({})", duration), THEME.accent_style()),
                     ]));
                 }
             };
-            
+
             ListItem::new(Line::from(vec![
                 Span::styled(prefix, style),
                 Span::styled(display_name, style),
@@ -1401,7 +1541,12 @@ fn render_song_list(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let songs_list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Music Library").style(THEME.primary_style()))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Music Library")
+                .style(THEME.primary_style()),
+        )
         .highlight_style(THEME.highlight_style());
 
     f.render_stateful_widget(songs_list, area, &mut app.list_state.clone());
@@ -1421,30 +1566,26 @@ fn render_queue(f: &mut Frame, area: Rect, app: &App) {
             } else {
                 "Unknown".to_string()
             };
-            
+
             let artist = song.album_artist.as_deref().unwrap_or("Unknown Artist");
-            
+
             ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{}. {}", i + 1, song.name),
-                    THEME.primary_style(),
-                ),
+                Span::styled(format!("{}. {}", i + 1, song.name), THEME.primary_style()),
                 Span::raw(" "),
-                Span::styled(
-                    format!("[{}]", artist),
-                    THEME.muted_style(),
-                ),
+                Span::styled(format!("[{}]", artist), THEME.muted_style()),
                 Span::raw(" "),
-                Span::styled(
-                    format!("({})", duration),
-                    THEME.accent_style(),
-                ),
+                Span::styled(format!("({})", duration), THEME.accent_style()),
             ]))
         })
         .collect();
 
     let queue_list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Queue").style(THEME.primary_style()))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Queue")
+                .style(THEME.primary_style()),
+        )
         .highlight_style(THEME.highlight_style());
 
     f.render_stateful_widget(queue_list, area, &mut app.queue_state.clone());
@@ -1460,14 +1601,22 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(status_block, area);
 
     // Create horizontal layout for better spacing inside the bordered area
-    let inner_area = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
+    let inner_area = Rect::new(
+        area.x + 1,
+        area.y + 1,
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
+    );
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50), // Song info (left side)
-            Constraint::Percentage(25), // Time info (center-left)
-            Constraint::Percentage(25), // Volume info (right side)
-        ].as_ref())
+        .constraints(
+            [
+                Constraint::Percentage(50), // Song info (left side)
+                Constraint::Percentage(25), // Time info (center-left)
+                Constraint::Percentage(25), // Volume info (right side)
+            ]
+            .as_ref(),
+        )
         .split(inner_area);
 
     let song_info = if let Some(ref song) = app.current_song {
@@ -1476,23 +1625,28 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     } else {
         "No song playing".to_string()
     };
-    
+
     let play_pause_text = if app.current_song.is_some() {
-        if app.is_paused { "⏸️" } else { "▶️" }
+        if app.is_paused {
+            "⏸️"
+        } else {
+            "▶️"
+        }
     } else {
         "⏹️"
     };
-    
+
     let time_text = if let Some(ref _song) = app.current_song {
         let current_time_str = app.format_time(app.current_time);
-        let total_duration = app.get_current_song_duration()
+        let total_duration = app
+            .get_current_song_duration()
             .map(|d| app.format_time(d))
             .unwrap_or_else(|| "Unknown".to_string());
         format!("{} / {}", current_time_str, total_duration)
     } else {
         "00:00 / 00:00".to_string()
     };
-    
+
     let volume_percent = (app.volume * 100.0) as u32;
     let volume_text = format!("🔊 {}%", volume_percent);
 
@@ -1548,11 +1702,13 @@ fn render_help_menu(f: &mut Frame, area: Rect) {
     let help_widget = Paragraph::new(help_text)
         .style(THEME.primary_style())
         .alignment(Alignment::Left)
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .title("Help")
-            .title_style(THEME.title_style())
-            .style(THEME.primary_style()));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Help")
+                .title_style(THEME.title_style())
+                .style(THEME.primary_style()),
+        );
 
     // Center the help menu on screen
     let help_area = Rect::new(
@@ -1585,7 +1741,7 @@ async fn main() -> Result<()> {
         app.username_input = creds.username.clone();
         app.password_input = creds.password.clone();
         app.input_mode = InputMode::SongList;
-        
+
         if let Err(e) = app.authenticate().await {
             app.error_message = Some(format!("Authentication failed: {}", e));
             app.input_mode = InputMode::ServerUrl;
@@ -1610,7 +1766,8 @@ async fn main() -> Result<()> {
         }
 
         // Check for autoplay - if current song finished and we have songs in queue
-        if app.input_mode == InputMode::SongList && app.is_song_finished() && !app.queue.is_empty() {
+        if app.input_mode == InputMode::SongList && app.is_song_finished() && !app.queue.is_empty()
+        {
             if let Err(e) = app.play_next_in_queue().await {
                 app.error_message = Some(format!("Autoplay failed: {}", e));
             }
@@ -1713,49 +1870,58 @@ async fn main() -> Result<()> {
                                     // Try to authenticate
                                     app.error_message = None;
                                     if let Err(e) = app.authenticate().await {
-                                        app.error_message = Some(format!("Authentication failed: {}", e));
+                                        app.error_message =
+                                            Some(format!("Authentication failed: {}", e));
                                     } else {
                                         app.input_mode = InputMode::SongList;
                                         if let Err(e) = app.load_songs().await {
-                                            app.error_message = Some(format!("Failed to load songs: {}", e));
+                                            app.error_message =
+                                                Some(format!("Failed to load songs: {}", e));
                                         }
                                     }
                                 }
-                                InputMode::SongList => {
-                                    match app.active_panel {
-                                        ActivePanel::Library => {
-                                            if let Some(selected) = app.list_state.selected() {
-                                                if let Some(node) = app.flat_library.get(selected) {
-                                                    match &node.item {
-                                                        LibraryItem::Song(song) => {
-                                                            let _song_name = song.name.clone();
-                                                            let song_clone = song.clone();
-                                                            app.stop_current_song();
-                                                            app.add_to_queue(song_clone.clone());
-                                                            if let Err(e) = app.play_song(&song_clone).await {
-                                                                app.error_message = Some(format!("Failed to play song: {}", e));
-                                                            }
-                                                        }
-                                                        LibraryItem::Artist(_) | LibraryItem::Album(_, _) => {
-                                                            app.navigate_right();
+                                InputMode::SongList => match app.active_panel {
+                                    ActivePanel::Library => {
+                                        if let Some(selected) = app.list_state.selected() {
+                                            if let Some(node) = app.flat_library.get(selected) {
+                                                match &node.item {
+                                                    LibraryItem::Song(song) => {
+                                                        let _song_name = song.name.clone();
+                                                        let song_clone = song.clone();
+                                                        app.stop_current_song();
+                                                        app.add_to_queue(song_clone.clone());
+                                                        if let Err(e) =
+                                                            app.play_song(&song_clone).await
+                                                        {
+                                                            app.error_message = Some(format!(
+                                                                "Failed to play song: {}",
+                                                                e
+                                                            ));
                                                         }
                                                     }
-                                                }
-                                            }
-                                        }
-                                        ActivePanel::Queue => {
-                                            if let Some(queue_selected) = app.queue_state.selected() {
-                                                if let Some(song) = app.queue.get(queue_selected) {
-                                                    let song_clone = song.clone();
-                                                    app.stop_current_song();
-                                                    if let Err(e) = app.play_song(&song_clone).await {
-                                                        app.error_message = Some(format!("Failed to play queue song: {}", e));
+                                                    LibraryItem::Artist(_)
+                                                    | LibraryItem::Album(_, _) => {
+                                                        app.navigate_right();
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                }
+                                    ActivePanel::Queue => {
+                                        if let Some(queue_selected) = app.queue_state.selected() {
+                                            if let Some(song) = app.queue.get(queue_selected) {
+                                                let song_clone = song.clone();
+                                                app.stop_current_song();
+                                                if let Err(e) = app.play_song(&song_clone).await {
+                                                    app.error_message = Some(format!(
+                                                        "Failed to play queue song: {}",
+                                                        e
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
                             }
                         }
                         KeyCode::Up => {
