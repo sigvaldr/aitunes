@@ -20,6 +20,74 @@ use std::{
     io::{self, BufReader, Cursor},
 };
 
+// Theme system
+struct Theme {
+    primary: Color,      // #00A6D7 - Main foreground color
+    background: Color,   // #343434 - Background color
+    secondary: Color,    // Lighter variant of primary
+    accent: Color,       // Complementary color for highlights
+    muted: Color,        // Muted version for secondary text
+    error: Color,        // Error color
+    success: Color,      // Success color
+}
+
+impl Theme {
+    fn new() -> Self {
+        Self {
+            primary: Color::Rgb(0, 166, 215),     // #00A6D7
+            background: Color::Rgb(52, 52, 52),    // #343434
+            secondary: Color::Rgb(0, 140, 190),    // Darker variant
+            accent: Color::Rgb(0, 120, 170),       // Even darker for contrast
+            muted: Color::Rgb(150, 150, 150),      // Light gray for secondary text on dark background
+            error: Color::Rgb(255, 100, 100),      // Brighter red for errors on dark background
+            success: Color::Rgb(100, 200, 100),    // Brighter green for success on dark background
+        }
+    }
+    
+    fn primary_style(&self) -> Style {
+        Style::default().fg(self.primary).bg(self.background)
+    }
+    
+    fn secondary_style(&self) -> Style {
+        Style::default().fg(self.secondary).bg(self.background)
+    }
+    
+    fn accent_style(&self) -> Style {
+        Style::default().fg(self.accent).bg(self.background)
+    }
+    
+    fn muted_style(&self) -> Style {
+        Style::default().fg(self.muted).bg(self.background)
+    }
+    
+    fn error_style(&self) -> Style {
+        Style::default().fg(self.error).bg(self.background)
+    }
+    
+    fn success_style(&self) -> Style {
+        Style::default().fg(self.success).bg(self.background)
+    }
+    
+    fn title_style(&self) -> Style {
+        Style::default().fg(self.primary).bg(self.background).add_modifier(Modifier::BOLD)
+    }
+    
+    fn highlight_style(&self) -> Style {
+        Style::default().fg(Color::Rgb(0, 0, 0)).bg(Color::Rgb(255, 255, 255)).add_modifier(Modifier::REVERSED)
+    }
+}
+
+// Global theme instance
+const THEME: Theme = Theme {
+    primary: Color::Rgb(0, 166, 215),
+    background: Color::Rgb(52, 52, 52),
+    secondary: Color::Rgb(0, 140, 190),
+    accent: Color::Rgb(0, 120, 170),
+    muted: Color::Rgb(150, 150, 150),
+    error: Color::Rgb(255, 100, 100),
+    success: Color::Rgb(100, 200, 100),
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Credentials {
     server_url: String,
@@ -129,6 +197,8 @@ struct App {
     volume: f32, // Volume level 0.0 to 1.0
     active_panel: ActivePanel,
     song_start_time: Option<std::time::Instant>, // When the current song started playing
+    show_help: bool, // Whether to show the help menu
+    last_key: Option<char>, // Track last key for /? combination
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +246,8 @@ impl App {
             volume: 0.8, // Default to 80% volume
             active_panel: ActivePanel::Library,
             song_start_time: None,
+            show_help: false,
+            last_key: None,
         }
     }
 
@@ -662,6 +734,106 @@ impl App {
         self.queue_state.select(None);
     }
     
+    fn shuffle_queue(&mut self) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        use std::time::{SystemTime, UNIX_EPOCH};
+        
+        if self.queue.len() <= 1 {
+            return;
+        }
+        
+        // Use current time as seed for randomness
+        let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+        let mut hasher = DefaultHasher::new();
+        seed.hash(&mut hasher);
+        let mut rng = hasher.finish();
+        
+        // Fisher-Yates shuffle
+        for i in (1..self.queue.len()).rev() {
+            rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
+            let j = (rng as usize) % (i + 1);
+            self.queue.swap(i, j);
+        }
+        
+        // Reset selection to first item
+        if !self.queue.is_empty() {
+            self.queue_state.select(Some(0));
+        }
+    }
+    
+    fn add_album_or_artist_to_queue(&mut self) {
+        if let Some(selected) = self.list_state.selected() {
+            if let Some(node) = self.flat_library.get(selected) {
+                match &node.item {
+                    LibraryItem::Artist(_) => {
+                        // Add all songs from this artist
+                        self.add_all_songs_from_artist(selected);
+                    }
+                    LibraryItem::Album(_, _) => {
+                        // Add all songs from this album
+                        self.add_all_songs_from_album(selected);
+                    }
+                    LibraryItem::Song(_) => {
+                        // Already handled by existing functionality
+                    }
+                }
+            }
+        }
+    }
+    
+    fn add_all_songs_from_artist(&mut self, artist_index: usize) {
+        if let Some(artist_node) = self.flat_library.get(artist_index) {
+            if let LibraryItem::Artist(artist_name) = &artist_node.item {
+                // Find all songs from this artist in the library
+                for song in &self.songs {
+                    if let Some(ref song_artist) = song.album_artist {
+                        if song_artist == artist_name {
+                            // Check if song is already in queue
+                            if !self.queue.iter().any(|q| q.id == song.id) {
+                                self.queue.push(song.clone());
+                            }
+                        }
+                    }
+                }
+                
+                // Update queue selection
+                if self.queue_state.selected().is_none() && !self.queue.is_empty() {
+                    self.queue_state.select(Some(0));
+                }
+            }
+        }
+    }
+    
+    fn add_all_songs_from_album(&mut self, album_index: usize) {
+        if let Some(album_node) = self.flat_library.get(album_index) {
+            if let LibraryItem::Album(artist_name, album_name) = &album_node.item {
+                // Find all songs from this album in the library
+                for song in &self.songs {
+                    if let Some(ref song_artist) = song.album_artist {
+                        if let Some(ref song_album) = song.album {
+                            if song_artist == artist_name && song_album == album_name {
+                                // Check if song is already in queue
+                                if !self.queue.iter().any(|q| q.id == song.id) {
+                                    self.queue.push(song.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Update queue selection
+                if self.queue_state.selected().is_none() && !self.queue.is_empty() {
+                    self.queue_state.select(Some(0));
+                }
+            }
+        }
+    }
+    
+    fn toggle_help(&mut self) {
+        self.show_help = !self.show_help;
+    }
+    
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
         if let Some(ref sink) = self.sink {
@@ -1054,9 +1226,9 @@ fn ui(f: &mut Frame, app: &App) {
         };
         if has_title {
             let title = Paragraph::new("🎵 aiTunes - Jellyfin Music Player")
-                .style(Style::default().fg(Color::Yellow))
+                .style(THEME.title_style())
                 .alignment(Alignment::Center)
-                .block(Block::default().borders(Borders::ALL));
+                .block(Block::default().borders(Borders::ALL).style(THEME.primary_style()));
             f.render_widget(title, main_chunks[0]);
             (main_chunks[1], main_chunks[2])
         } else {
@@ -1080,6 +1252,11 @@ fn ui(f: &mut Frame, app: &App) {
         }
     }
     render_status_bar(f, status_chunk, app);
+    
+    // Show help menu if enabled
+    if app.show_help {
+        render_help_menu(f, f.size());
+    }
 }
 
 fn render_login_screen(f: &mut Frame, area: Rect, app: &App) {
@@ -1090,45 +1267,45 @@ fn render_login_screen(f: &mut Frame, area: Rect, app: &App) {
 
     // Server URL input
     let server_url_style = if app.input_mode == InputMode::ServerUrl {
-        Style::default().fg(Color::Yellow)
+        THEME.title_style()
     } else {
-        Style::default().fg(Color::White)
+        THEME.primary_style()
     };
     let server_url = Paragraph::new(format!("Server URL: {}", app.server_url_input))
         .style(server_url_style)
-        .block(Block::default().borders(Borders::ALL).title("Server URL"));
+        .block(Block::default().borders(Borders::ALL).title("Server URL").style(THEME.primary_style()));
     f.render_widget(server_url, chunks[0]);
 
     // Username input
     let username_style = if app.input_mode == InputMode::Username {
-        Style::default().fg(Color::Yellow)
+        THEME.title_style()
     } else {
-        Style::default().fg(Color::White)
+        THEME.primary_style()
     };
     let username = Paragraph::new(format!("Username: {}", app.username_input))
         .style(username_style)
-        .block(Block::default().borders(Borders::ALL).title("Username"));
+        .block(Block::default().borders(Borders::ALL).title("Username").style(THEME.primary_style()));
     f.render_widget(username, chunks[1]);
 
     // Password input
     let password_style = if app.input_mode == InputMode::Password {
-        Style::default().fg(Color::Yellow)
+        THEME.title_style()
     } else {
-        Style::default().fg(Color::White)
+        THEME.primary_style()
     };
     let password_display = "*".repeat(app.password_input.len());
     let password = Paragraph::new(format!("Password: {}", password_display))
         .style(password_style)
-        .block(Block::default().borders(Borders::ALL).title("Password"));
+        .block(Block::default().borders(Borders::ALL).title("Password").style(THEME.primary_style()));
     f.render_widget(password, chunks[2]);
 
     // Error message
     if let Some(ref error) = app.error_message {
         let error_area = Rect::new(area.x, area.y + 9, area.width, 3);
         let error_widget = Paragraph::new(error.as_str())
-            .style(Style::default().fg(Color::Red))
+            .style(THEME.error_style())
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).title("Error"));
+            .block(Block::default().borders(Borders::ALL).title("Error").style(THEME.error_style()));
         f.render_widget(Clear, error_area);
         f.render_widget(error_widget, error_area);
     }
@@ -1150,9 +1327,9 @@ fn render_loading_screen(f: &mut Frame, area: Rect, progress: usize, total: usiz
         Line::from(""),
         Line::from("Please wait while your music library loads..."),
     ])
-    .style(Style::default().fg(Color::Yellow))
+    .style(THEME.primary_style())
     .alignment(Alignment::Center)
-    .block(Block::default().borders(Borders::ALL).title("Loading Music Library"));
+    .block(Block::default().borders(Borders::ALL).title("Loading Music Library").style(THEME.primary_style()));
     
     f.render_widget(loading_widget, area);
 }
@@ -1178,11 +1355,11 @@ fn render_song_list(f: &mut Frame, area: Rect, app: &App) {
             let (prefix, style) = match &node.item {
                 LibraryItem::Artist(_) => {
                     let symbol = if node.is_expanded() { "▼" } else { "▶" };
-                    (format!("{}{} ", indent, symbol), Style::default().fg(Color::Cyan))
+                    (format!("{}{} ", indent, symbol), THEME.title_style())
                 }
                 LibraryItem::Album(_, _) => {
                     let symbol = if node.is_expanded() { "▼" } else { "▶" };
-                    (format!("{}{} ", indent, symbol), Style::default().fg(Color::Green))
+                    (format!("{}{} ", indent, symbol), THEME.secondary_style())
                 }
                 LibraryItem::Song(song) => {
                     let duration = if let Some(ticks) = song.run_time_ticks {
@@ -1200,17 +1377,17 @@ fn render_song_list(f: &mut Frame, area: Rect, app: &App) {
                     return ListItem::new(Line::from(vec![
                         Span::styled(
                             format!("{}  {}", indent, song.name),
-                            Style::default().fg(Color::White),
+                            THEME.primary_style(),
                         ),
                         Span::raw(" "),
                         Span::styled(
                             format!("[{}]", album),
-                            Style::default().fg(Color::Gray),
+                            THEME.muted_style(),
                         ),
                         Span::raw(" "),
                         Span::styled(
                             format!("({})", duration),
-                            Style::default().fg(Color::Blue),
+                            THEME.accent_style(),
                         ),
                     ]));
                 }
@@ -1224,8 +1401,8 @@ fn render_song_list(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let songs_list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Music Library"))
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        .block(Block::default().borders(Borders::ALL).title("Music Library").style(THEME.primary_style()))
+        .highlight_style(THEME.highlight_style());
 
     f.render_stateful_widget(songs_list, area, &mut app.list_state.clone());
 }
@@ -1250,25 +1427,25 @@ fn render_queue(f: &mut Frame, area: Rect, app: &App) {
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("{}. {}", i + 1, song.name),
-                    Style::default().fg(Color::White),
+                    THEME.primary_style(),
                 ),
                 Span::raw(" "),
                 Span::styled(
                     format!("[{}]", artist),
-                    Style::default().fg(Color::Gray),
+                    THEME.muted_style(),
                 ),
                 Span::raw(" "),
                 Span::styled(
                     format!("({})", duration),
-                    Style::default().fg(Color::Blue),
+                    THEME.accent_style(),
                 ),
             ]))
         })
         .collect();
 
     let queue_list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Queue"))
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        .block(Block::default().borders(Borders::ALL).title("Queue").style(THEME.primary_style()))
+        .highlight_style(THEME.highlight_style());
 
     f.render_stateful_widget(queue_list, area, &mut app.queue_state.clone());
 }
@@ -1278,7 +1455,8 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     let status_block = Block::default()
         .borders(Borders::ALL)
         .title("Status")
-        .title_style(Style::default().fg(Color::Cyan));
+        .title_style(THEME.title_style())
+        .style(THEME.primary_style());
     f.render_widget(status_block, area);
 
     // Create horizontal layout for better spacing inside the bordered area
@@ -1321,21 +1499,71 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     // Left side: Play/pause button and song info
     let left_text = format!("{} {}", play_pause_text, song_info);
     let left_widget = Paragraph::new(left_text)
-        .style(Style::default().fg(Color::White))
+        .style(THEME.primary_style())
         .alignment(Alignment::Left);
     f.render_widget(left_widget, chunks[0]);
 
     // Center: Time info
     let time_widget = Paragraph::new(time_text)
-        .style(Style::default().fg(Color::Yellow))
+        .style(THEME.accent_style())
         .alignment(Alignment::Center);
     f.render_widget(time_widget, chunks[1]);
 
     // Right side: Volume info
     let volume_widget = Paragraph::new(volume_text)
-        .style(Style::default().fg(Color::Green))
+        .style(THEME.accent_style())
         .alignment(Alignment::Right);
     f.render_widget(volume_widget, chunks[2]);
+}
+
+fn render_help_menu(f: &mut Frame, area: Rect) {
+    let help_text = vec![
+        Line::from("🎵 aiTunes - Key Bindings"),
+        Line::from(""),
+        Line::from("Navigation:"),
+        Line::from("  ↑/↓     Navigate up/down"),
+        Line::from("  ←/→     Expand/collapse folders"),
+        Line::from("  Tab     Switch between Library and Queue"),
+        Line::from(""),
+        Line::from("Playback:"),
+        Line::from("  Enter   Play selected song/queue item"),
+        Line::from("  Space   Pause/Resume"),
+        Line::from("  +/=     Increase volume"),
+        Line::from("  -       Decrease volume"),
+        Line::from("  PageUp  Increase volume"),
+        Line::from("  PageDown Decrease volume"),
+        Line::from(""),
+        Line::from("Queue Management:"),
+        Line::from("  Q       Add/Remove song from queue"),
+        Line::from("  A       Add entire album/artist to queue"),
+        Line::from("  S       Shuffle queue"),
+        Line::from(""),
+        Line::from("Other:"),
+        Line::from("  /?      Show/Hide this help menu"),
+        Line::from("  Esc     Exit application"),
+        Line::from(""),
+        Line::from("Press /? again to close this menu"),
+    ];
+
+    let help_widget = Paragraph::new(help_text)
+        .style(THEME.primary_style())
+        .alignment(Alignment::Left)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title("Help")
+            .title_style(THEME.title_style())
+            .style(THEME.primary_style()));
+
+    // Center the help menu on screen
+    let help_area = Rect::new(
+        area.x + area.width / 4,
+        area.y + area.height / 4,
+        area.width / 2,
+        area.height / 2,
+    );
+
+    f.render_widget(Clear, help_area);
+    f.render_widget(help_widget, help_area);
 }
 
 #[tokio::main]
@@ -1399,21 +1627,25 @@ async fn main() -> Result<()> {
                             if app.input_mode == InputMode::SongList {
                                 app.switch_panel();
                             }
+                            app.last_key = None;
                         }
                         KeyCode::Char('q') => {
                             if app.input_mode == InputMode::SongList {
                                 app.toggle_queue_item();
                             }
+                            app.last_key = None;
                         }
                         KeyCode::PageUp => {
                             if app.input_mode == InputMode::SongList {
                                 app.adjust_volume(0.1);
                             }
+                            app.last_key = None;
                         }
                         KeyCode::PageDown => {
                             if app.input_mode == InputMode::SongList {
                                 app.adjust_volume(-0.1);
                             }
+                            app.last_key = None;
                         }
                         KeyCode::Esc => {
                             if app.input_mode == InputMode::SongList {
@@ -1425,6 +1657,7 @@ async fn main() -> Result<()> {
                                 app.password_input.clear();
                                 app.error_message = None;
                             }
+                            app.last_key = None;
                         }
                         KeyCode::Char(c) => {
                             if app.input_mode == InputMode::SongList {
@@ -1438,7 +1671,24 @@ async fn main() -> Result<()> {
                                     '-' => {
                                         app.adjust_volume(-0.1);
                                     }
-                                    _ => {}
+                                    'a' | 'A' => {
+                                        app.add_album_or_artist_to_queue();
+                                    }
+                                    's' | 'S' => {
+                                        app.shuffle_queue();
+                                    }
+                                    '/' => {
+                                        app.last_key = Some('/');
+                                    }
+                                    '?' => {
+                                        if app.last_key == Some('/') {
+                                            app.toggle_help();
+                                        }
+                                        app.last_key = None;
+                                    }
+                                    _ => {
+                                        app.last_key = None;
+                                    }
                                 }
                             } else {
                                 app.handle_input(c);
@@ -1448,8 +1698,10 @@ async fn main() -> Result<()> {
                             if app.input_mode != InputMode::SongList {
                                 app.handle_backspace();
                             }
+                            app.last_key = None;
                         }
                         KeyCode::Enter => {
+                            app.last_key = None;
                             match app.input_mode {
                                 InputMode::ServerUrl => {
                                     app.next_input_mode();
@@ -1510,21 +1762,25 @@ async fn main() -> Result<()> {
                             if app.input_mode == InputMode::SongList {
                                 app.navigate_up();
                             }
+                            app.last_key = None;
                         }
                         KeyCode::Down => {
                             if app.input_mode == InputMode::SongList {
                                 app.navigate_down();
                             }
+                            app.last_key = None;
                         }
                         KeyCode::Left => {
                             if app.input_mode == InputMode::SongList {
                                 app.navigate_left();
                             }
+                            app.last_key = None;
                         }
                         KeyCode::Right => {
                             if app.input_mode == InputMode::SongList {
                                 app.navigate_right();
                             }
+                            app.last_key = None;
                         }
                         _ => {}
                     }
