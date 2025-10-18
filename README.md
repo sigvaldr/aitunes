@@ -13,39 +13,21 @@ A terminal-based music player that streams music from your Jellyfin server. Buil
 ## Features
 
 - 🎵 Stream music directly from your Jellyfin server
-- 🔐 Secure credential storage (saved locally, not prompted every time)
+- 🔐 Credential storage (saved locally, not prompted every time)
 - 🎨 Beautiful terminal UI with song browsing
-- ⌨️ Keyboard shortcuts for easy navigation
+- ⌨️ Intuitive keyboard shortcuts for easy navigation
 - 🔊 High-quality audio playback using Rodio
 - 📱 Cross-platform support
 
 ## Installation
 
-### Prerequisites
-
-- Rust 1.70+ installed on your system
-- A running Jellyfin server with music library
-
-### Build from Source
-
-```bash
-git clone <your-repo-url>
-cd aitunes
-cargo build --release
-```
-
-The executable will be created at `target/release/aitunes` (or `target/release/aitunes.exe` on Windows).
+Simply download and run the correct binary for your operating system
 
 ## Usage
 
 ### First Run
 
-1. Launch the application:
-   ```bash
-   cargo run
-   # or if built:
-   ./target/release/aitunes
-   ```
+1. Launch the application
 
 2. Enter your Jellyfin server details when prompted:
    - **Server URL**: Your Jellyfin server address (e.g., `http://localhost:8096` or `https://your-server.com`)
@@ -55,13 +37,19 @@ The executable will be created at `target/release/aitunes` (or `target/release/a
 3. The application will authenticate and load your music library
 
 ### Navigation
+Press `?` or `/` for this information within the application
 
-Once authenticated, you can navigate the music library:
-
-- **Arrow Keys** or **j/k**: Navigate up/down through songs
-- **Enter**: Play the selected song
-- **Space**: Stop current playback
-- **Esc** or **q**: Exit the application
+↑/↓     Navigate up/down
+←/→     Expand/collapse folders
+Tab     Switch between Library and Queue
+Enter   Play selected song/queue item
+Space   Pause/Resume
++/-     Change volume
+PgUp/Dn Change volume
+Q       Add/Remove selection from queue
+S       Shuffle queue
+C       Clear queue
+Esc     Exit application
 
 ### Credential Storage
 
@@ -72,9 +60,21 @@ Your credentials are securely stored in your system's config directory:
 
 The credentials are stored in plain text JSON format. For enhanced security, consider using environment variables or a more secure storage method.
 
-## Technical Details
+## Build from Source
 
-### Dependencies
+### Prerequisites
+
+- The latest version of Rust and Cargo installed on your system
+
+```bash
+git clone https://github.com/sigvaldr/aitunes.git
+cd aitunes
+cargo build --release
+```
+
+The executable will be created at `target/release/aitunes` (or `target/release/aitunes.exe` on Windows).
+
+### Crates Used
 
 - **reqwest**: HTTP client for Jellyfin API communication
 - **rodio**: Audio playback engine
@@ -94,32 +94,6 @@ The application uses the Jellyfin REST API to:
 
 Songs are streamed directly from your Jellyfin server and played using Rodio's audio engine, which supports various audio formats including MP3, FLAC, and more.
 
-## Troubleshooting
-
-### Common Issues
-
-1. **Authentication Failed**
-   - Verify your server URL is correct and accessible
-   - Check your username and password
-   - Ensure your Jellyfin server is running
-
-2. **No Songs Loaded**
-   - Verify your Jellyfin library contains audio files
-   - Check that your user has access to the music library
-   - Ensure the library is properly configured in Jellyfin
-
-3. **Audio Playback Issues**
-   - Check your system's audio output
-   - Verify the audio file format is supported
-   - Try restarting the application
-
-### Debug Mode
-
-For debugging, you can run with more verbose output:
-```bash
-RUST_LOG=debug cargo run
-```
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues and pull requests.
@@ -127,9 +101,3 @@ Contributions are welcome! Please feel free to submit issues and pull requests.
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Built with the amazing Rust ecosystem
-- Uses Jellyfin's excellent media server platform
-- Inspired by terminal-based music players like cmus and ncmpcpp
