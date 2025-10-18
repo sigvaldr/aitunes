@@ -1670,7 +1670,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_help_menu(f: &mut Frame, area: Rect) {
     let help_text = vec![
-        Line::from("aiTunes - Key Bindings"),
+        Line::from("🎵 aiTunes - Key Bindings"),
         Line::from(""),
         Line::from("Navigation:"),
         Line::from("  ↑/↓     Navigate up/down"),
@@ -1680,8 +1680,10 @@ fn render_help_menu(f: &mut Frame, area: Rect) {
         Line::from("Playback:"),
         Line::from("  Enter   Play selected song/queue item"),
         Line::from("  Space   Pause/Resume"),
-        Line::from("  +/-     Change volume"),
-        Line::from("  PgUp/Dn Change volume"),
+        Line::from("  +/=     Increase volume"),
+        Line::from("  -       Decrease volume"),
+        Line::from("  PageUp  Increase volume"),
+        Line::from("  PageDown Decrease volume"),
         Line::from(""),
         Line::from("Queue Management:"),
         Line::from("  Q       Add/Remove song from queue"),
@@ -1689,10 +1691,10 @@ fn render_help_menu(f: &mut Frame, area: Rect) {
         Line::from("  S       Shuffle queue"),
         Line::from(""),
         Line::from("Other:"),
-        Line::from("  h/?     Show/Hide this help menu"),
+        Line::from("  /?      Show/Hide this help menu"),
         Line::from("  Esc     Exit application"),
         Line::from(""),
-        Line::from("Press h/? again to close this menu"),
+        Line::from("Press /? again to close this menu"),
     ];
 
     let help_widget = Paragraph::new(help_text)
@@ -1784,6 +1786,7 @@ async fn main() -> Result<()> {
                         KeyCode::Char('q') => {
                             if app.input_mode == InputMode::SongList {
                                 app.toggle_queue_item();
+                                app.add_album_or_artist_to_queue();
                             }
                         }
                         KeyCode::PageUp => {
@@ -1819,14 +1822,13 @@ async fn main() -> Result<()> {
                                     '-' => {
                                         app.adjust_volume(-0.1);
                                     }
-                                    'a' | 'A' => {
-                                        app.add_album_or_artist_to_queue();
-                                    }
                                     's' | 'S' => {
                                         app.shuffle_queue();
                                     }
                                     '?' | '/' | 'h' | 'H' => {
                                         app.toggle_help();
+                                    }
+                                     _ => {
                                     }
                                 }
                             } else {
@@ -1923,6 +1925,7 @@ async fn main() -> Result<()> {
                             if app.input_mode == InputMode::SongList {
                                 app.navigate_right();
                             }
+
                         }
                         _ => {}
                     }
