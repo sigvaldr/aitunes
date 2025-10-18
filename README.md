@@ -6,88 +6,130 @@
   <br>
 </h1>
 
-<h4 align="center">A terminal-based music player, with 99% of the source being written by ChatGPT</h4>
+# aiTunes - Terminal Jellyfin Music Player
 
-<!-- <p align="center">
-  <a href="https://badge.fury.io/js/electron-markdownify">
-    <img src="https://badge.fury.io/js/electron-markdownify.svg"
-         alt="Gitter">
-  </a>
-  <a href="https://gitter.im/amitmerchant1990/electron-markdownify"><img src="https://badges.gitter.im/amitmerchant1990/electron-markdownify.svg"></a>
-  <a href="https://saythanks.io/to/bullredeyes@gmail.com">
-      <img src="https://img.shields.io/badge/SayThanks.io-%E2%98%BC-1EAEDB.svg">
-  </a>
-  <a href="https://www.paypal.me/AmitMerchant">
-    <img src="https://img.shields.io/badge/$-donate-ff69b4.svg?maxAge=2592000&amp;style=flat">
-  </a>
-</p> -->
+A terminal-based music player that streams music from your Jellyfin server. Built with Rust and featuring a clean, intuitive interface.
 
-<p align="center">
-  <a href="#key-features">Key Features</a> •
-  <a href="#how-to-use">How To Use</a> •
-  <a href="#download">Download</a>
-</p>
+## Features
 
-![screenshot](https://raw.githubusercontent.com/sigvaldr/aitunes/refs/heads/master/img/screenshot.png)
+- 🎵 Stream music directly from your Jellyfin server
+- 🔐 Secure credential storage (saved locally, not prompted every time)
+- 🎨 Beautiful terminal UI with song browsing
+- ⌨️ Keyboard shortcuts for easy navigation
+- 🔊 High-quality audio playback using Rodio
+- 📱 Cross-platform support
 
-## Key Features
-
-- Cross platform
-  - Windows, macOS and Linux ready.
-- Lightweight audio playback
-  - Uses dr_mp3 for MP3 decoding and miniaudio for audio output
-  - No heavy dependencies like libvlc
-- Terminal-based interface
-  - Full ncurses-based TUI with tree navigation
-  - Queue management and shuffle functionality
-
-## How To Use
+## Installation
 
 ### Prerequisites
 
-- libcurl development headers
-- ncurses development headers
-- ALSA development headers (for Linux audio)
-- pthread (usually included with gcc)
+- Rust 1.70+ installed on your system
+- A running Jellyfin server with music library
 
-### Building
+### Build from Source
 
-1. Clone the repository
-2. Run the build script:
+```bash
+git clone <your-repo-url>
+cd aitunes
+cargo build --release
+```
+
+The executable will be created at `target/release/aitunes` (or `target/release/aitunes.exe` on Windows).
+
+## Usage
+
+### First Run
+
+1. Launch the application:
    ```bash
-   chmod +x build.sh
-   ./build.sh
+   cargo run
+   # or if built:
+   ./target/release/aitunes
    ```
 
-The build script will automatically download the required dr_mp3 and miniaudio headers.
+2. Enter your Jellyfin server details when prompted:
+   - **Server URL**: Your Jellyfin server address (e.g., `http://localhost:8096` or `https://your-server.com`)
+   - **Username**: Your Jellyfin username
+   - **Password**: Your Jellyfin password
 
-### Running
+3. The application will authenticate and load your music library
 
-1. Run the compiled binary:
-   ```bash
-   ./dist/aitunes
-   ```
+### Navigation
 
-2. On first run, you'll be prompted to enter your Jellyfin server details:
-   - Server URL
-   - Username
-   - Password
+Once authenticated, you can navigate the music library:
 
-3. The app will authenticate and load your music library.
+- **Arrow Keys** or **j/k**: Navigate up/down through songs
+- **Enter**: Play the selected song
+- **Space**: Stop current playback
+- **Esc** or **q**: Exit the application
 
-### Controls
+### Credential Storage
 
-- **Navigation**: Arrow keys to move, Enter to expand/collapse folders
-- **Playback**: Enter to play a track, Space to pause/resume
-- **Volume**: Page Up/Down to adjust volume
-- **Queue**: F to add tracks to queue, Tab to switch focus
-- **Shuffle**: S to shuffle the queue
-- **Quit**: Q to exit
+Your credentials are securely stored in your system's config directory:
+- **Windows**: `%APPDATA%\aitunes\credentials.json`
+- **macOS**: `~/Library/Application Support/aitunes/credentials.json`
+- **Linux**: `~/.config/aitunes/credentials.json`
 
-## Download
+The credentials are stored in plain text JSON format. For enhanced security, consider using environment variables or a more secure storage method.
 
-You can [download](https://github.com/sigvaldr/aitunes/releases/) the latest installable version of aiTunes for Linux. (Windows and macOS soon™️)
+## Technical Details
 
-## Emailware
+### Dependencies
 
-aiTunes is an [emailware](https://en.wiktionary.org/wiki/emailware). If you have used this app and have anything at all to say, I'd like you send me an email at <me@sigvaldr.lol>. I'd love to hear your feedback!
+- **reqwest**: HTTP client for Jellyfin API communication
+- **rodio**: Audio playback engine
+- **ratatui**: Terminal UI framework
+- **crossterm**: Cross-platform terminal manipulation
+- **serde**: Serialization/deserialization
+- **tokio**: Async runtime
+
+### Jellyfin API Integration
+
+The application uses the Jellyfin REST API to:
+- Authenticate users via `/Users/authenticatebyname`
+- Retrieve music items via `/Users/{userId}/Items`
+- Stream audio via `/Audio/{itemId}/Download`
+
+### Audio Streaming
+
+Songs are streamed directly from your Jellyfin server and played using Rodio's audio engine, which supports various audio formats including MP3, FLAC, and more.
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Authentication Failed**
+   - Verify your server URL is correct and accessible
+   - Check your username and password
+   - Ensure your Jellyfin server is running
+
+2. **No Songs Loaded**
+   - Verify your Jellyfin library contains audio files
+   - Check that your user has access to the music library
+   - Ensure the library is properly configured in Jellyfin
+
+3. **Audio Playback Issues**
+   - Check your system's audio output
+   - Verify the audio file format is supported
+   - Try restarting the application
+
+### Debug Mode
+
+For debugging, you can run with more verbose output:
+```bash
+RUST_LOG=debug cargo run
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Built with the amazing Rust ecosystem
+- Uses Jellyfin's excellent media server platform
+- Inspired by terminal-based music players like cmus and ncmpcpp

@@ -1,0 +1,10 @@
+# Rust
+/target/
+
+# Optional: For library projects, consider ignoring Cargo.lock
+# Cargo.lock
+
+# Operating System and Editor files
+.DS_Store
+.vscode/
+*.swp
