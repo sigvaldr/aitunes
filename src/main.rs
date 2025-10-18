@@ -1670,31 +1670,19 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_help_menu(f: &mut Frame, area: Rect) {
     let help_text = vec![
-        Line::from("🎵 aiTunes - Key Bindings"),
+        Line::from("aiTunes - Key Bindings"),
         Line::from(""),
-        Line::from("Navigation:"),
         Line::from("  ↑/↓     Navigate up/down"),
         Line::from("  ←/→     Expand/collapse folders"),
         Line::from("  Tab     Switch between Library and Queue"),
-        Line::from(""),
-        Line::from("Playback:"),
         Line::from("  Enter   Play selected song/queue item"),
         Line::from("  Space   Pause/Resume"),
-        Line::from("  +/=     Increase volume"),
-        Line::from("  -       Decrease volume"),
-        Line::from("  PageUp  Increase volume"),
-        Line::from("  PageDown Decrease volume"),
-        Line::from(""),
-        Line::from("Queue Management:"),
-        Line::from("  Q       Add/Remove song from queue"),
-        Line::from("  A       Add entire album/artist to queue"),
+        Line::from("  +/-     Change volume"),
+        Line::from("  PgUp/Dn Change volume"),
+        Line::from("  Q       Add/Remove selection from queue"),
         Line::from("  S       Shuffle queue"),
-        Line::from(""),
-        Line::from("Other:"),
-        Line::from("  /?      Show/Hide this help menu"),
+        Line::from("  H/?      Show/Hide this help menu"),
         Line::from("  Esc     Exit application"),
-        Line::from(""),
-        Line::from("Press /? again to close this menu"),
     ];
 
     let help_widget = Paragraph::new(help_text)

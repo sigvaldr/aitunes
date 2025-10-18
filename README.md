@@ -1,6 +1,6 @@
 <h1 align="center">
   <br>
-  <img src="https://raw.githubusercontent.com/sigvaldr/aitunes/refs/heads/master/img/logo.png" alt="aiTunes" width="200">
+  <img src="https://raw.githubusercontent.com/sigvaldr/aitunes/refs/heads/master/logo.png" alt="aiTunes" width="200">
   <br>
   aiTunes
   <br>
