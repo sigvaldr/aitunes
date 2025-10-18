@@ -204,7 +204,6 @@ struct App {
     active_panel: ActivePanel,
     song_start_time: Option<std::time::Instant>, // When the current song started playing
     show_help: bool,                             // Whether to show the help menu
-    last_key: Option<char>,                      // Track last key for /? combination
 }
 
 #[derive(Debug, Clone)]
@@ -253,7 +252,6 @@ impl App {
             active_panel: ActivePanel::Library,
             song_start_time: None,
             show_help: false,
-            last_key: None,
         }
     }
 
@@ -1782,25 +1780,21 @@ async fn main() -> Result<()> {
                             if app.input_mode == InputMode::SongList {
                                 app.switch_panel();
                             }
-                            app.last_key = None;
                         }
                         KeyCode::Char('q') => {
                             if app.input_mode == InputMode::SongList {
                                 app.toggle_queue_item();
                             }
-                            app.last_key = None;
                         }
                         KeyCode::PageUp => {
                             if app.input_mode == InputMode::SongList {
                                 app.adjust_volume(0.1);
                             }
-                            app.last_key = None;
                         }
                         KeyCode::PageDown => {
                             if app.input_mode == InputMode::SongList {
                                 app.adjust_volume(-0.1);
                             }
-                            app.last_key = None;
                         }
                         KeyCode::Esc => {
                             if app.input_mode == InputMode::SongList {
@@ -1812,7 +1806,6 @@ async fn main() -> Result<()> {
                                 app.password_input.clear();
                                 app.error_message = None;
                             }
-                            app.last_key = None;
                         }
                         KeyCode::Char(c) => {
                             if app.input_mode == InputMode::SongList {
@@ -1835,9 +1828,6 @@ async fn main() -> Result<()> {
                                     '?' | '/' | 'h' | 'H' => {
                                         app.toggle_help();
                                     }
-                                    _ => {
-                                        app.last_key = None;
-                                    }
                                 }
                             } else {
                                 app.handle_input(c);
@@ -1847,10 +1837,8 @@ async fn main() -> Result<()> {
                             if app.input_mode != InputMode::SongList {
                                 app.handle_backspace();
                             }
-                            app.last_key = None;
                         }
                         KeyCode::Enter => {
-                            app.last_key = None;
                             match app.input_mode {
                                 InputMode::ServerUrl => {
                                     app.next_input_mode();
@@ -1920,25 +1908,21 @@ async fn main() -> Result<()> {
                             if app.input_mode == InputMode::SongList {
                                 app.navigate_up();
                             }
-                            app.last_key = None;
                         }
                         KeyCode::Down => {
                             if app.input_mode == InputMode::SongList {
                                 app.navigate_down();
                             }
-                            app.last_key = None;
                         }
                         KeyCode::Left => {
                             if app.input_mode == InputMode::SongList {
                                 app.navigate_left();
                             }
-                            app.last_key = None;
                         }
                         KeyCode::Right => {
                             if app.input_mode == InputMode::SongList {
                                 app.navigate_right();
                             }
-                            app.last_key = None;
                         }
                         _ => {}
                     }
